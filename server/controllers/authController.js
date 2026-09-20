@@ -368,41 +368,23 @@ const login = async (req, res) => {
   }
 };
 
-// @desc    Instant Guest Login (defaults to student role)
-// @route   POST /api/auth/guest
-const guestLogin = async (req, res) => {
+// @desc    Verify instructor authorization code securely
+// @route   POST /api/auth/verify-instructor-code
+const verifyInstructorCode = async (req, res) => {
   try {
-    const randomSuffix = Math.floor(100 + Math.random() * 900);
-    const guestId = 'guest_' + Date.now();
-    const username = `Student_Guest_${randomSuffix}`;
-    const name = `Guest Student #${randomSuffix}`;
-    const randomColor = avatarColors[Math.floor(Math.random() * avatarColors.length)];
-
-    const token = generateToken({
-      userId: guestId,
-      role: 'student',
-      username,
-      name,
-      isGuest: true
-    });
-
-    res.json({
+    const { inviteCode } = req.body;
+    if (!inviteCode || inviteCode.trim() !== INSTRUCTOR_INVITE_CODE.trim()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Invalid instructor authorization code. Contact your institution administrator.'
+      });
+    }
+    return res.json({
       success: true,
-      token,
-      user: {
-        id: guestId,
-        userId: guestId,
-        name,
-        username,
-        email: `${username.toLowerCase()}@netcollaborate.local`,
-        role: 'student',
-        rollNumber: `GUEST-${randomSuffix}`,
-        avatarColor: randomColor,
-        isGuest: true
-      }
+      message: 'Instructor authorization verified.'
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -422,7 +404,7 @@ const getMe = async (req, res) => {
 module.exports = {
   register,
   login,
-  guestLogin,
+  verifyInstructorCode,
   getMe,
   memoryUsers,
   generateToken,

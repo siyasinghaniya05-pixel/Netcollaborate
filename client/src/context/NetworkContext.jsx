@@ -2,7 +2,6 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { networkAPI } from '../services/api';
 import { getSocket } from '../services/socket';
 import { useAuth } from './AuthContext';
-import { DEMO_NETWORK } from '../utils/demoNetwork';
 import { generateMAC } from '../utils/networkMath';
 
 const NetworkContext = createContext(null);
@@ -120,14 +119,25 @@ function addEdge(edgeParams, edges = []) {
   return [...edges, edgeParams];
 }
 
+const DEFAULT_STARTER_NETWORK = {
+  id: 'starter-network',
+  name: 'New Network Topology',
+  description: 'Design and simulate custom multi-subnet networking topologies.',
+  roomId: 'NET-TOPOLOGY-01',
+  nodes: [],
+  edges: [],
+  subnets: [],
+  simulationHistory: []
+};
+
 export const NetworkProvider = ({ children }) => {
   const { user } = useAuth();
   const [theme, setTheme] = useState(localStorage.getItem('netcollaborate-theme') || 'dark');
 
   // Network State
-  const [network, setNetwork] = useState(DEMO_NETWORK);
-  const [nodes, setNodes] = useState(DEMO_NETWORK.nodes);
-  const [edges, setEdges] = useState(DEMO_NETWORK.edges);
+  const [network, setNetwork] = useState(DEFAULT_STARTER_NETWORK);
+  const [nodes, setNodes] = useState([]);
+  const [edges, setEdges] = useState([]);
   const [selectedNode, setSelectedNode] = useState(null);
   const [saveStatus, setSaveStatus] = useState('saved'); // 'saved' | 'saving' | 'unsaved'
 
@@ -140,9 +150,9 @@ export const NetworkProvider = ({ children }) => {
   const [diagnostics, setDiagnostics] = useState({
     errors: [],
     warnings: [],
-    validCount: 7,
+    validCount: 0,
     healthScore: 100,
-    summary: { errorCount: 0, warningCount: 0, validCount: 7, healthRating: 'Excellent' }
+    summary: { errorCount: 0, warningCount: 0, validCount: 0, healthRating: 'Ready' }
   });
 
   // Simulation & Animation State
@@ -151,7 +161,7 @@ export const NetworkProvider = ({ children }) => {
   const [activeStepIndex, setActiveStepIndex] = useState(-1);
   const [activeNodeId, setActiveNodeId] = useState(null);
   const [activeEdgeId, setActiveEdgeId] = useState(null);
-  const [simulationHistory, setSimulationHistory] = useState(DEMO_NETWORK.simulationHistory || []);
+  const [simulationHistory, setSimulationHistory] = useState([]);
 
   // Collaboration State
   const [activeUsers, setActiveUsers] = useState([]);
@@ -503,7 +513,7 @@ export const NetworkProvider = ({ children }) => {
 
   // Version Control (Snapshots, Compare, Restore)
   const fetchSnapshots = useCallback(async () => {
-    const netId = network?.id || network?._id || network?.roomId || 'demo';
+    const netId = network?.id || network?._id || network?.roomId || 'current';
     setIsLoadingSnapshots(true);
     try {
       const res = await networkAPI.getSnapshots(netId);
@@ -519,7 +529,7 @@ export const NetworkProvider = ({ children }) => {
 
   const takeSnapshot = async (name, description) => {
     try {
-      const netId = network?.id || network?._id || network?.roomId || 'demo';
+      const netId = network?.id || network?._id || network?.roomId || 'current';
       const payload = {
         name: name || `Snapshot ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
         description: description || 'Manual snapshot checkpoint',
@@ -549,7 +559,7 @@ export const NetworkProvider = ({ children }) => {
 
   const revertToSnapshot = async (snapshotId) => {
     try {
-      const netId = network?.id || network?._id || network?.roomId || 'demo';
+      const netId = network?.id || network?._id || network?.roomId || 'current';
       const res = await networkAPI.restoreSnapshot(netId, snapshotId);
       if (res.data?.success) {
         const restored = res.data.data;
@@ -579,7 +589,7 @@ export const NetworkProvider = ({ children }) => {
 
   const compareVersions = async (snapshotAId, snapshotBId) => {
     try {
-      const netId = network?.id || network?._id || network?.roomId || 'demo';
+      const netId = network?.id || network?._id || network?.roomId || 'current';
       const res = await networkAPI.compareSnapshots(netId, {
         snapshotAId,
         snapshotBId,
@@ -606,7 +616,7 @@ export const NetworkProvider = ({ children }) => {
     socket.emit('join-room', {
       roomId: network.roomId,
       user: {
-        id: user?.id || user?._id || 'guest',
+        id: user?.id || user?._id || 'user',
         name: user?.name || 'Engineer',
         username: user?.username || 'engineer',
         avatarColor: user?.avatarColor || '#3b82f6'

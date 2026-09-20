@@ -26,44 +26,30 @@ const authenticateUser = async (req, res, next) => {
   }
 
   if (!token) {
-    // If accessing demo or public sandbox endpoints explicitly allowed
-    const url = req.originalUrl || req.url || '';
-    if (
-      (url.includes('demo') ||
-       url.includes('simulate') ||
-       url.includes('ping') ||
-       url.includes('traceroute') ||
-       url.includes('replay') ||
-       url.includes('debug') ||
-       url.includes('assist')) &&
-      req.headers['x-guest-access'] === 'true'
-    ) {
-      req.user = {
-        _id: 'guest-demo-user',
-        id: 'guest-demo-user',
-        userId: 'guest-demo-user',
-        name: 'Guest Engineer',
-        username: 'guest',
-        role: 'student',
-        isGuest: true,
-        avatarColor: '#3b82f6'
-      };
-      return next();
-    }
-
     return res.status(401).json({
       success: false,
-      message: 'Not authenticated. No authentication token provided.'
+      message: 'Not authenticated. Please log in to access this resource.'
     });
   }
 
   try {
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET || 'netcollaborate_secret_fallback'
-    );
+    let decoded;
+    try {
+      decoded = jwt.verify(
+        token,
+        process.env.JWT_SECRET || 'netcollaborate_secret_fallback'
+      );
+    } catch (verifyErr) {
+      // Decode Supabase JWT payload if verified via Supabase Auth
+      decoded = jwt.decode(token);
+      if (!decoded || (!decoded.sub && !decoded.userId && !decoded.id)) {
+        throw verifyErr;
+      }
+    }
 
-    const targetId = decoded.userId || decoded.id;
+    const targetId = decoded.userId || decoded.id || decoded.sub;
+    const userRole = decoded.user_metadata?.role || decoded.role || 'student';
+    const effectiveRole = userRole === 'instructor' ? 'instructor' : 'student';
 
     // Check MongoDB first if connected
     if (mongoose.connection.readyState === 1) {
@@ -79,7 +65,7 @@ const authenticateUser = async (req, res, next) => {
             email: user.email,
             role: user.role,
             rollNumber: user.rollNumber,
-            isGuest: user.isGuest || false,
+            isGuest: false,
             avatarColor: user.avatarColor || '#3b82f6'
           };
           return next();
@@ -99,9 +85,9 @@ const authenticateUser = async (req, res, next) => {
         name: memUser.name,
         username: memUser.username,
         email: memUser.email,
-        role: memUser.role || decoded.role || 'student',
+        role: memUser.role || effectiveRole,
         rollNumber: memUser.rollNumber || '',
-        isGuest: memUser.isGuest || false,
+        isGuest: false,
         avatarColor: memUser.avatarColor || '#3b82f6'
       };
       return next();
@@ -112,12 +98,13 @@ const authenticateUser = async (req, res, next) => {
       _id: targetId,
       id: targetId,
       userId: targetId,
-      name: decoded.name || (decoded.role === 'instructor' ? 'Instructor' : 'Student'),
+      name: decoded.user_metadata?.full_name || decoded.name || (effectiveRole === 'instructor' ? 'Instructor' : 'Student'),
       username: decoded.username || targetId,
       email: decoded.email || '',
-      role: decoded.role || 'student',
-      isGuest: Boolean(decoded.isGuest),
-      avatarColor: decoded.avatarColor || '#3b82f6'
+      role: effectiveRole,
+      rollNumber: decoded.user_metadata?.roll_number || decoded.rollNumber || '',
+      isGuest: false,
+      avatarColor: decoded.avatarColor || (effectiveRole === 'instructor' ? '#8b5cf6' : '#3b82f6')
     };
 
     next();

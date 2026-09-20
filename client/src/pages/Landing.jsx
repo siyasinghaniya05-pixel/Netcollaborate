@@ -18,7 +18,7 @@ import Navbar from '../components/Navbar';
 import { useAuth } from '../context/AuthContext';
 
 const Landing = () => {
-  const { isAuthenticated, loginAsGuest } = useAuth();
+  const { isAuthenticated } = useAuth();
 
   const features = [
     {
@@ -127,9 +127,9 @@ const Landing = () => {
                 <span>Start Building Free</span>
                 <ArrowRight size={18} />
               </Link>
-              <Link to="/workspace/demo" className="btn btn-secondary" style={{ padding: '0.75rem 1.75rem', fontSize: '1rem' }}>
+              <Link to="/login" className="btn btn-secondary" style={{ padding: '0.75rem 1.75rem', fontSize: '1rem' }}>
                 <Network size={18} color="var(--primary)" />
-                <span>Explore Demo Network</span>
+                <span>Sign In to Laboratory</span>
               </Link>
             </>
           )}

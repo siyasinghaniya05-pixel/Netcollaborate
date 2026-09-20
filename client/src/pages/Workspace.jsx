@@ -39,7 +39,6 @@ import LabReportModal from '../components/LabReportModal';
 
 import { useNetwork } from '../context/NetworkContext';
 import { networkAPI } from '../services/api';
-import { DEMO_NETWORK } from '../utils/demoNetwork';
 import { ReactFlowProvider } from 'reactflow';
 
 const Workspace = () => {
@@ -55,21 +54,16 @@ const Workspace = () => {
 
   // Load requested network if ID parameter provided
   useEffect(() => {
-    if (id) {
-      if (id === 'demo' || id === 'demo-enterprise-network' || id === 'NET-DEMO01') {
-        loadNetwork(DEMO_NETWORK);
-      } else {
-        networkAPI.getNetworkById(id)
-          .then(res => {
-            if (res.data?.success) {
-              loadNetwork(res.data.data);
-            }
-          })
-          .catch(err => {
-            console.warn('Network not found, loading demo network:', err.message);
-            loadNetwork(DEMO_NETWORK);
-          });
-      }
+    if (id && id !== 'default') {
+      networkAPI.getNetworkById(id)
+        .then(res => {
+          if (res.data?.success && res.data.data) {
+            loadNetwork(res.data.data);
+          }
+        })
+        .catch(err => {
+          console.warn('Network not found:', err.message);
+        });
     }
   }, [id]);
 

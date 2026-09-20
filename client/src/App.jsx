@@ -96,9 +96,23 @@ function App() {
               />
               <Route path="/instructor" element={<Navigate to="/instructor/dashboard" replace />} />
 
-              {/* Workspace Simulator */}
-              <Route path="/workspace/:id" element={<Workspace />} />
-              <Route path="/workspace" element={<Navigate to="/workspace/demo" replace />} />
+              {/* Workspace Simulator (Authenticated Only) */}
+              <Route
+                path="/workspace/:id"
+                element={
+                  <ProtectedRoute>
+                    <Workspace />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/workspace"
+                element={
+                  <ProtectedRoute>
+                    <Workspace />
+                  </ProtectedRoute>
+                }
+              />
 
               {/* Profile */}
               <Route
@@ -121,8 +135,41 @@ function App() {
               />
               <Route path="/lab" element={<Navigate to="/dashboard" replace />} />
 
-              {/* FSK Laboratory */}
-              <Route path="/fsk-lab" element={<FskLab />} />
+              {/* FSK Laboratory (Authenticated Only) */}
+              <Route
+                path="/fsk-lab"
+                element={
+                  <ProtectedRoute>
+                    <FskLab />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Protected Shortcut Navigation */}
+              <Route
+                path="/experiments"
+                element={
+                  <ProtectedRoute>
+                    <RoleDashboardRedirect />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/detective"
+                element={
+                  <ProtectedRoute>
+                    <RoleDashboardRedirect />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/join-lab"
+                element={
+                  <ProtectedRoute>
+                    <RoleDashboardRedirect />
+                  </ProtectedRoute>
+                }
+              />
 
               {/* Fallback */}
               <Route path="*" element={<Navigate to="/" replace />} />

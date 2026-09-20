@@ -80,9 +80,7 @@ const StudentDashboard = () => {
         if (labRes.data?.success && labRes.data.data) {
           setActiveSession(labRes.data.data);
         }
-      } catch (e) {
-        // demo fallback
-      }
+      } catch (e) {}
 
       // 2. Fetch standard experiments
       try {
@@ -234,7 +232,7 @@ const StudentDashboard = () => {
                   Student Portal
                 </div>
                 <div style={{ fontSize: '0.72rem', color: '#0284c7', fontWeight: 600 }}>
-                  {user?.rollNumber || 'CS2026-STUDENT'}
+                  {user?.rollNumber || 'Student Portal'}
                 </div>
               </div>
             </div>
@@ -303,7 +301,7 @@ const StudentDashboard = () => {
             </button>
 
             <button
-              onClick={() => navigate('/workspace/demo')}
+              onClick={() => navigate('/workspace')}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -475,7 +473,7 @@ const StudentDashboard = () => {
               </button>
               <button
                 className="btn btn-secondary btn-sm"
-                onClick={() => navigate('/workspace/demo')}
+                onClick={() => navigate('/workspace')}
               >
                 <Network size={15} />
                 <span>Open Simulator</span>
@@ -499,10 +497,10 @@ const StudentDashboard = () => {
                 <span className="status-dot up" />
               </div>
               <div style={{ fontSize: '1.25rem', fontWeight: 800, marginTop: '8px', color: '#0284c7' }}>
-                {activeSession ? activeSession.sessionCode : 'NC-7F42K'}
+                {activeSession ? (activeSession.sessionCode || activeSession.session_code) : 'None'}
               </div>
               <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                {activeSession?.instructorName || 'Prof. Sharma'} (Digital Comms)
+                {activeSession ? `${activeSession.instructorName || activeSession.instructor_name} (${activeSession.subject || 'Networking'})` : 'No active laboratory session'}
               </div>
             </div>
 
@@ -530,7 +528,7 @@ const StudentDashboard = () => {
                 {avgScore} / 100
               </div>
               <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                Academic evaluation grade: A
+                {avgScore > 0 ? `Academic evaluation: ${avgScore >= 90 ? 'Grade A' : avgScore >= 80 ? 'Grade B' : 'Grade C'}` : 'No graded submissions yet'}
               </div>
             </div>
 
@@ -726,7 +724,7 @@ const StudentDashboard = () => {
                         if (exp.id.includes('FSK') || exp.id.includes('BER') || exp.id.includes('NOISE')) {
                           navigate('/fsk-lab');
                         } else {
-                          navigate('/workspace/demo');
+                          navigate('/workspace');
                         }
                       }}
                       style={{ fontSize: '0.75rem', padding: '3px 8px' }}

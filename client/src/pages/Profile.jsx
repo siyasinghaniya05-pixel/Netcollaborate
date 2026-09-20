@@ -148,7 +148,7 @@ const Profile = () => {
               <input
                 type="email"
                 className="input-field"
-                value={user?.email || 'guest@netcollaborate.local'}
+                value={user?.email || ''}
                 disabled
                 style={{ opacity: 0.6, cursor: 'not-allowed' }}
               />

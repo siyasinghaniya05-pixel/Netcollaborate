@@ -70,100 +70,27 @@ export default function InstructorDashboard() {
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Active Lab Session Management State (Default NC-FSK-7A42)
-  const initialStudentList = [
-    {
-      studentId: 'stu-01',
-      name: 'Siya Singhaniya',
-      rollNumber: 'CS2026-081',
-      status: 'Online',
-      currentExperiment: 'FSK',
-      progress: 65,
-      ber: 2.3,
-      score: 88,
-      joinedAt: new Date(Date.now() - 25 * 60000)
-    },
-    {
-      studentId: 'stu-02',
-      name: 'Rohan Verma',
-      rollNumber: 'CS2026-042',
-      status: 'Online',
-      currentExperiment: 'FSK',
-      progress: 100,
-      ber: 0.0,
-      score: 92,
-      joinedAt: new Date(Date.now() - 45 * 60000)
-    },
-    {
-      studentId: 'stu-03',
-      name: 'Omkar Joshi',
-      rollNumber: 'CS2026-104',
-      status: 'Running',
-      currentExperiment: 'FSK',
-      progress: 40,
-      ber: 0.0,
-      score: 75,
-      joinedAt: new Date(Date.now() - 30 * 60000)
-    },
-    {
-      studentId: 'stu-04',
-      name: 'Shivani Patel',
-      rollNumber: 'CS2026-019',
-      status: 'Submitted',
-      currentExperiment: 'FSK',
-      progress: 95,
-      ber: 1.2,
-      score: 88,
-      joinedAt: new Date(Date.now() - 35 * 60000)
-    }
-  ];
-
-  // Add 39 more students to reach 43 total students (39 Online, matching spec)
-  const moreNames = [
-    'Aarav Sharma', 'Aditi Rao', 'Ananya Gupta', 'Aryan Deshmukh', 'Bhavya Nair',
-    'Chetan Kulkarni', 'Devendra Patil', 'Diya Mehta', 'Gaurav Shinde', 'Isha Sen',
-    'Kabir Sengupta', 'Kavya Iyer', 'Manish Reddy', 'Meera Pillai', 'Nikhil Bhat',
-    'Neha Chawla', 'Pooja Hegde', 'Pranav Roy', 'Priya Dixit', 'Rahul Joshi',
-    'Rhea Banerjee', 'Rishi Menon', 'Saanvi Trivedi', 'Sahil Kapoor', 'Samarth Jain',
-    'Sanya Malhotra', 'Siddharth Bose', 'Sneha Agarwal', 'Tanvi Saxena', 'Utkarsh Dubey',
-    'Varun Chopra', 'Vidya Balan', 'Yash Gaikwad', 'Zoya Khan', 'Amitabh Paul',
-    'Bipasha Roy', 'Chirag Sethi', 'Deepak More', 'Esha Pandey'
-  ];
-
-  moreNames.forEach((name, idx) => {
-    initialStudentList.push({
-      studentId: `stu-bench-${idx + 5}`,
-      name,
-      rollNumber: `CS2026-${String(idx + 5).padStart(3, '0')}`,
-      status: idx < 35 ? 'Online' : 'Running',
-      currentExperiment: 'FSK',
-      progress: 45 + (idx % 50),
-      ber: parseFloat((0.4 + (idx % 3) * 0.6).toFixed(1)),
-      score: 80 + (idx % 18),
-      joinedAt: new Date(Date.now() - (idx + 10) * 60000)
-    });
-  });
-
+  // Active Lab Session Management State
   const [activeSession, setActiveSession] = useState({
-    sessionCode: 'NC-FSK-7A42',
-    joinCode: 'NET-4821',
+    sessionCode: '',
+    joinCode: '',
     title: 'Digital Communication Lab',
     subject: 'Computer Networks',
     room: 'Networking Lab 2',
-    instructorName: 'Dr. Santosh Patil',
-    date: '20 September 2026',
+    instructorName: user?.name || 'Instructor',
+    date: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }),
     startTime: '10:00 AM',
     endTime: '12:00 PM',
     experimentName: 'FSK Modulation and Demodulation',
     experimentType: 'FSK',
-    selectedExperiments: ['FSK', 'ASK', 'PSK'],
+    selectedExperiments: ['FSK'],
     status: 'active',
     durationMinutes: 120,
     maxStudents: 50,
     description: 'Perform FSK modulation, transmission, demodulation and BER analysis.',
     instructions: '1. Build the network.\n2. Enter binary data.\n3. Configure FSK frequencies.\n4. Add channel noise.\n5. Perform demodulation.\n6. Calculate BER.\n7. Submit the experiment.',
     startTimeDate: new Date(),
-    students: initialStudentList
+    students: []
   });
 
   // Create Lab Session Form State
@@ -203,54 +130,14 @@ export default function InstructorDashboard() {
       // 2. Fetch submissions
       try {
         const subRes = await experimentAPI.getResults();
-        if (subRes.data?.success && subRes.data.data.length > 0) {
+        if (subRes.data?.success && Array.isArray(subRes.data.data)) {
           setSubmissions(subRes.data.data);
         } else {
-          // Default demo submissions
-          setSubmissions([
-            {
-              id: 'sub-01',
-              studentName: 'Siya Singhaniya',
-              rollNumber: 'CS2026-081',
-              experimentTitle: 'Binary Frequency Shift Keying (BFSK)',
-              sessionCode: 'NC-7F42K',
-              score: 92,
-              status: 'Completed',
-              ber: 1.2,
-              letterGrade: 'A',
-              submittedAt: new Date(Date.now() - 15 * 60000),
-              evaluationBreakdown: [
-                { criterion: 'Network Configuration', marksAwarded: 20, maxMarks: 20 },
-                { criterion: 'FSK Implementation', marksAwarded: 25, maxMarks: 25 },
-                { criterion: 'Demodulation', marksAwarded: 15, maxMarks: 15 },
-                { criterion: 'BER Analysis', marksAwarded: 15, maxMarks: 15 },
-                { criterion: 'Experiment Completion', marksAwarded: 15, maxMarks: 15 },
-                { criterion: 'Report', marksAwarded: 10, maxMarks: 10 }
-              ]
-            },
-            {
-              id: 'sub-02',
-              studentName: 'Shivani Patel',
-              rollNumber: 'CS2026-019',
-              experimentTitle: 'Binary Frequency Shift Keying (BFSK)',
-              sessionCode: 'NC-7F42K',
-              score: 88,
-              status: 'Submitted',
-              ber: 3.1,
-              letterGrade: 'B',
-              submittedAt: new Date(Date.now() - 35 * 60000),
-              evaluationBreakdown: [
-                { criterion: 'Network Configuration', marksAwarded: 18, maxMarks: 20 },
-                { criterion: 'FSK Implementation', marksAwarded: 23, maxMarks: 25 },
-                { criterion: 'Demodulation', marksAwarded: 14, maxMarks: 15 },
-                { criterion: 'BER Analysis', marksAwarded: 13, maxMarks: 15 },
-                { criterion: 'Experiment Completion', marksAwarded: 12, maxMarks: 15 },
-                { criterion: 'Report', marksAwarded: 8, maxMarks: 10 }
-              ]
-            }
-          ]);
+          setSubmissions([]);
         }
-      } catch (e) {}
+      } catch (e) {
+        setSubmissions([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -391,7 +278,7 @@ export default function InstructorDashboard() {
   const pendingEvaluations = submissions.filter(s => s.status === 'Submitted').length;
   const avgClassScore = submissions.length > 0
     ? Math.round(submissions.reduce((a, b) => a + (b.score || 0), 0) / submissions.length)
-    : 88;
+    : 0;
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: 'var(--bg-primary)', display: 'flex', flexDirection: 'column' }}>
@@ -432,7 +319,7 @@ export default function InstructorDashboard() {
                   Faculty Portal
                 </div>
                 <div style={{ fontSize: '0.72rem', color: '#8b5cf6', fontWeight: 600 }}>
-                  {user?.name || 'Prof. Sharma'}
+                  {user?.name || 'Faculty Instructor'}
                 </div>
               </div>
             </div>

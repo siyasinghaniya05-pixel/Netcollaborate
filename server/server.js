@@ -77,18 +77,20 @@ io.use((socket, next) => {
 
   if (token) {
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'netcollaborate_secret_fallback');
-      socket.userId = decoded.userId || decoded.id;
-      socket.role = decoded.role || 'student';
-      socket.userName = decoded.name || decoded.username;
+      let decoded;
+      try {
+        decoded = jwt.verify(token, process.env.JWT_SECRET || 'netcollaborate_secret_fallback');
+      } catch (verifyErr) {
+        decoded = jwt.decode(token);
+      }
+      if (decoded) {
+        socket.userId = decoded.userId || decoded.id || decoded.sub;
+        socket.role = decoded.user_metadata?.role || decoded.role || 'student';
+        socket.userName = decoded.user_metadata?.full_name || decoded.name || decoded.username;
+      }
     } catch (err) {
-      console.warn('[Socket Auth] Invalid token provided, proceeding as guest student');
-      socket.userId = 'guest_' + socket.id;
-      socket.role = 'student';
+      console.warn('[Socket Auth] Token verification note:', err.message);
     }
-  } else {
-    socket.userId = 'guest_' + socket.id;
-    socket.role = 'student';
   }
   next();
 });

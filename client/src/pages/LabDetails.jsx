@@ -64,7 +64,7 @@ const EXPERIMENT_CATALOG = {
     color: '#3b82f6',
     gradient: 'linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(96, 165, 250, 0.1) 100%)',
     description: 'Build virtual star topologies, configure static IP addressing, inspect ARP tables, and verify end-to-end ICMP ping.',
-    route: '/workspace/demo'
+    route: '/workspace'
   }
 };
 
@@ -83,39 +83,20 @@ export default function LabDetails() {
       setLoading(true);
       setError(null);
       try {
-        const codeToFetch = sessionCode || 'NC-FSK-7A42';
+        const codeToFetch = sessionCode;
+        if (!codeToFetch) {
+          setError('Session code is required.');
+          return;
+        }
         const res = await labAPI.getLabById(codeToFetch);
         if (res.data?.success && res.data.data) {
           setSession(res.data.data);
-          setLiveStudentCount(res.data.data.students?.length || 43);
+          setLiveStudentCount(res.data.data.students?.length || 0);
         } else {
-          throw new Error('Session details could not be retrieved');
+          setError('Laboratory session not found or has concluded.');
         }
       } catch (err) {
-        console.warn('Could not load session, falling back to default:', err.message);
-        // Fallback default demo session matching exact specification
-        const fallback = {
-          sessionCode: (sessionCode || 'NC-FSK-7A42').toUpperCase(),
-          title: 'Digital Communication Lab',
-          subject: 'Computer Networks',
-          room: 'Networking Lab 2',
-          instructorName: 'Dr. Santosh Patil',
-          date: '20 September 2026',
-          startTime: '10:00 AM',
-          endTime: '12:00 PM',
-          maxStudents: 50,
-          status: 'active',
-          description: 'Perform FSK modulation, transmission, demodulation and BER analysis.',
-          instructions: '1. Build the network.\n2. Enter binary data.\n3. Configure FSK frequencies.\n4. Add channel noise.\n5. Perform demodulation.\n6. Calculate BER.\n7. Submit the experiment.',
-          selectedExperiments: ['FSK'],
-          students: Array(43).fill(null).map((_, i) => ({
-            studentId: `stu-${i + 1}`,
-            name: `Student ${i + 1}`,
-            rollNumber: `CS2026-${String(i + 1).padStart(3, '0')}`
-          }))
-        };
-        setSession(fallback);
-        setLiveStudentCount(43);
+        setError(err.response?.data?.message || 'Unable to load laboratory session. Please verify the session code.');
       } finally {
         setLoading(false);
       }

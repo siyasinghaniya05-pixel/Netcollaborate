@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { Network, Mail, Lock, ArrowRight, UserCheck, AlertCircle, GraduationCap, User } from 'lucide-react';
+import { Network, Mail, Lock, ArrowRight, AlertCircle, GraduationCap, User } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import Navbar from '../components/Navbar';
 
 const Login = () => {
-  const { login, loginAsGuest } = useAuth();
+  const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -13,13 +13,12 @@ const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [guestLoading, setGuestLoading] = useState(false);
   const [error, setError] = useState(location.state?.message || '');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!email || !password) {
-      setError('Please fill in both email / student ID and password');
+      setError('Please fill in both email / ID and password');
       return;
     }
 
@@ -35,35 +34,10 @@ const Login = () => {
         navigate('/student/dashboard');
       }
     } catch (err) {
-      const msg = err.response?.data?.message || 'Invalid credentials or role mismatch. Please verify.';
+      const msg = err.message || err.response?.data?.message || 'Invalid credentials or role mismatch. Please verify.';
       setError(msg);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleGuest = async () => {
-    setGuestLoading(true);
-    setError('');
-    try {
-      await loginAsGuest();
-      navigate('/student/dashboard');
-    } catch (err) {
-      setError('Guest login failed. Please try again.');
-    } finally {
-      setGuestLoading(false);
-    }
-  };
-
-  const autofillDemo = (role) => {
-    setSelectedRole(role);
-    setError('');
-    if (role === 'student') {
-      setEmail('student@college.edu');
-      setPassword('student123');
-    } else {
-      setEmail('instructor@college.edu');
-      setPassword('faculty123');
     }
   };
 
@@ -105,7 +79,7 @@ const Login = () => {
             </p>
           </div>
 
-          {/* Section 1: Explicit Role Selection Segment */}
+          {/* Role Selection Segment */}
           <div style={{ marginBottom: '1.5rem' }}>
             <label
               style={{
@@ -200,13 +174,13 @@ const Login = () => {
 
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div className="input-group" style={{ marginBottom: 0 }}>
-              <label className="input-label">Email / Student ID</label>
+              <label className="input-label">Email / College ID</label>
               <div style={{ position: 'relative' }}>
                 <Mail size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                 <input
-                  type="text"
+                  type="email"
                   className="input-field"
-                  placeholder={selectedRole === 'instructor' ? 'faculty@college.edu' : 'student@college.edu or Roll No'}
+                  placeholder={selectedRole === 'instructor' ? 'faculty@college.edu' : 'student@college.edu'}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   style={{ paddingLeft: '32px' }}
@@ -249,70 +223,7 @@ const Login = () => {
             </button>
           </form>
 
-          {/* Quick Demo Autofill Helpers */}
-          <div
-            style={{
-              display: 'flex',
-              gap: '8px',
-              marginTop: '1rem',
-              padding: '8px',
-              borderRadius: 'var(--radius-sm)',
-              backgroundColor: 'var(--bg-tertiary)',
-              border: '1px dashed var(--border-color)',
-              fontSize: '0.74rem'
-            }}
-          >
-            <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>Test:</span>
-            <button
-              type="button"
-              onClick={() => autofillDemo('student')}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: '#38bdf8',
-                cursor: 'pointer',
-                fontWeight: 600,
-                textDecoration: 'underline'
-              }}
-            >
-              Student (Siya)
-            </button>
-            <span style={{ color: 'var(--text-muted)' }}>|</span>
-            <button
-              type="button"
-              onClick={() => autofillDemo('instructor')}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: '#a78bfa',
-                cursor: 'pointer',
-                fontWeight: 600,
-                textDecoration: 'underline'
-              }}
-            >
-              Instructor (Prof. Sharma)
-            </button>
-          </div>
-
-          <div style={{ position: 'relative', margin: '1.25rem 0', textAlign: 'center' }}>
-            <div style={{ position: 'absolute', inset: '50% 0 auto 0', borderTop: '1px solid var(--border-color)' }} />
-            <span style={{ position: 'relative', backgroundColor: 'var(--bg-secondary)', padding: '0 0.75rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-              OR
-            </span>
-          </div>
-
-          <button
-            type="button"
-            className="btn btn-secondary"
-            style={{ width: '100%', padding: '0.65rem' }}
-            onClick={handleGuest}
-            disabled={guestLoading}
-          >
-            <UserCheck size={16} color="var(--primary)" />
-            <span>{guestLoading ? 'Starting Student Guest Session...' : 'Continue as Student Guest'}</span>
-          </button>
-
-          <div style={{ textAlign: 'center', marginTop: '1.25rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+          <div style={{ textAlign: 'center', marginTop: '1.5rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
             Need an account?{' '}
             <Link to="/register" style={{ color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}>
               Register Here

@@ -11,7 +11,6 @@ const Register = () => {
   const [selectedRole, setSelectedRole] = useState('student'); // 'student' | 'instructor'
   const [formData, setFormData] = useState({
     name: '',
-    username: '',
     email: '',
     rollNumber: '',
     inviteCode: '',
@@ -20,6 +19,7 @@ const Register = () => {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [infoMessage, setInfoMessage] = useState('');
 
   const handleChange = (e) => {
     setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
@@ -45,12 +45,13 @@ const Register = () => {
     }
 
     if (selectedRole === 'instructor' && !inviteCode.trim()) {
-      setError('Instructor invitation code is required to register as faculty.');
+      setError('Institutional instructor authorization code is required.');
       return;
     }
 
     setLoading(true);
     setError('');
+    setInfoMessage('');
 
     try {
       const res = await register({
@@ -62,13 +63,18 @@ const Register = () => {
         inviteCode: selectedRole === 'instructor' ? inviteCode.trim() : ''
       });
 
+      if (res?.requiresVerification) {
+        setInfoMessage(res.message || 'Account created! Please check your email to verify.');
+        return;
+      }
+
       if (selectedRole === 'instructor') {
         navigate('/instructor/dashboard');
       } else {
         navigate('/student/dashboard');
       }
     } catch (err) {
-      setError(err.response?.data?.message || 'Registration failed. Please try again.');
+      setError(err.message || err.response?.data?.message || 'Registration failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -203,6 +209,22 @@ const Register = () => {
             </div>
           )}
 
+          {infoMessage && (
+            <div
+              style={{
+                padding: '0.65rem 0.85rem',
+                borderRadius: 'var(--radius-sm)',
+                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+                color: '#10b981',
+                fontSize: '0.8rem',
+                marginBottom: '1.25rem'
+              }}
+            >
+              <span>{infoMessage}</span>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
             <div className="input-group" style={{ marginBottom: 0 }}>
               <label className="input-label">Full Name</label>
@@ -212,7 +234,7 @@ const Register = () => {
                   type="text"
                   name="name"
                   className="input-field"
-                  placeholder={selectedRole === 'instructor' ? 'Prof. Amit Sharma' : 'Siya Singhaniya'}
+                  placeholder="Your Full Name"
                   value={formData.name}
                   onChange={handleChange}
                   style={{ paddingLeft: '32px' }}
@@ -222,14 +244,14 @@ const Register = () => {
             </div>
 
             <div className="input-group" style={{ marginBottom: 0 }}>
-              <label className="input-label">Email / College ID</label>
+              <label className="input-label">Email Address</label>
               <div style={{ position: 'relative' }}>
                 <Mail size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                 <input
                   type="email"
                   name="email"
                   className="input-field"
-                  placeholder="engineer@college.edu"
+                  placeholder="your.email@college.edu"
                   value={formData.email}
                   onChange={handleChange}
                   style={{ paddingLeft: '32px' }}
@@ -247,7 +269,7 @@ const Register = () => {
                     type="text"
                     name="rollNumber"
                     className="input-field"
-                    placeholder="CS2026-081"
+                    placeholder="e.g. CS2026-001"
                     value={formData.rollNumber}
                     onChange={handleChange}
                     style={{ paddingLeft: '32px' }}
@@ -257,16 +279,15 @@ const Register = () => {
             ) : (
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <label className="input-label">Instructor Invitation Code</label>
-                  <span style={{ fontSize: '0.7rem', color: '#a78bfa' }}>Default: FACULTY-2026</span>
+                  <label className="input-label">Instructor Authorization Code</label>
                 </div>
                 <div style={{ position: 'relative' }}>
                   <KeyRound size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#a78bfa' }} />
                   <input
-                    type="text"
+                    type="password"
                     name="inviteCode"
                     className="input-field"
-                    placeholder="FACULTY-2026"
+                    placeholder="Enter institutional authorization code"
                     value={formData.inviteCode}
                     onChange={handleChange}
                     style={{ paddingLeft: '32px', borderColor: '#8b5cf6' }}
@@ -274,7 +295,7 @@ const Register = () => {
                   />
                 </div>
                 <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '3px', display: 'block' }}>
-                  Authorized faculty authorization code required to prevent unauthorized instructor creation.
+                  Institutional faculty authorization code required to prevent unauthorized instructor creation.
                 </span>
               </div>
             )}

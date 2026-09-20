@@ -47,7 +47,7 @@ import { getSocket } from '../services/socket';
 import { useAuth } from '../context/AuthContext';
 
 const PRESETS = [
-  { label: 'Demo Sequence (10110010)', value: '10110010' },
+  { label: 'Standard Sequence (10110010)', value: '10110010' },
   { label: 'Alternating Bits (10101010)', value: '10101010' },
   { label: 'Block Bursts (11001100)', value: '11001100' },
   { label: 'All Mark 1s (11111111)', value: '11111111' },
