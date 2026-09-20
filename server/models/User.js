@@ -31,6 +31,25 @@ const UserSchema = new mongoose.Schema({
     minlength: 6,
     select: false
   },
+  role: {
+    type: String,
+    enum: ['student', 'instructor'],
+    required: [true, 'Please provide a role (student or instructor)'],
+    default: 'student'
+  },
+  rollNumber: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  xp: {
+    type: Number,
+    default: 120
+  },
+  level: {
+    type: Number,
+    default: 1
+  },
   isGuest: {
     type: Boolean,
     default: false
@@ -38,11 +57,9 @@ const UserSchema = new mongoose.Schema({
   avatarColor: {
     type: String,
     default: '#3b82f6'
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
   }
+}, {
+  timestamps: true
 });
 
 // Encrypt password using bcrypt

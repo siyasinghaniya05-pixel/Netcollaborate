@@ -159,6 +159,12 @@ export const NetworkProvider = ({ children }) => {
   const [activityLogs, setActivityLogs] = useState([]);
   const [chatMessages, setChatMessages] = useState([]);
 
+  // Version Control & Snapshots State
+  const [snapshots, setSnapshots] = useState([]);
+  const [selectedSnapshot, setSelectedSnapshot] = useState(null);
+  const [diffResult, setDiffResult] = useState(null);
+  const [isLoadingSnapshots, setIsLoadingSnapshots] = useState(false);
+
   // Only establish the Socket.IO collaboration connection when the user is
   // actually inside a workspace. Otherwise (Landing / Login / Register /
   // Dashboard) we avoid a redundant connection and its latency.
@@ -223,6 +229,26 @@ export const NetworkProvider = ({ children }) => {
       setTimeout(() => { isUndoRedoRef.current = false; }, 50);
     }
   };
+
+  // Keyboard Shortcuts: Ctrl+Z (Undo) and Ctrl+Y / Ctrl+Shift+Z (Redo)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        undo();
+      } else if (
+        ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') ||
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'z')
+      ) {
+        e.preventDefault();
+        redo();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undo, redo]);
 
   // React Flow Handlers
   const onNodesChange = useCallback((changes) => {
@@ -475,6 +501,100 @@ export const NetworkProvider = ({ children }) => {
     }
   };
 
+  // Version Control (Snapshots, Compare, Restore)
+  const fetchSnapshots = useCallback(async () => {
+    const netId = network?.id || network?._id || network?.roomId || 'demo';
+    setIsLoadingSnapshots(true);
+    try {
+      const res = await networkAPI.getSnapshots(netId);
+      if (res.data?.success) {
+        setSnapshots(res.data.data);
+      }
+    } catch (err) {
+      console.warn('Could not fetch snapshots:', err.message);
+    } finally {
+      setIsLoadingSnapshots(false);
+    }
+  }, [network?.id, network?._id, network?.roomId]);
+
+  const takeSnapshot = async (name, description) => {
+    try {
+      const netId = network?.id || network?._id || network?.roomId || 'demo';
+      const payload = {
+        name: name || `Snapshot ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+        description: description || 'Manual snapshot checkpoint',
+        nodes,
+        edges,
+        healthScore: diagnostics?.healthScore ?? 100
+      };
+      const res = await networkAPI.createSnapshot(netId, payload);
+      if (res.data?.success) {
+        const snap = res.data.data;
+        setSnapshots(prev => [snap, ...prev]);
+
+        if (collaborationActive && network?.roomId) {
+          const socket = getSocket();
+          socket.emit('snapshot-created', {
+            roomId: network.roomId,
+            snapshot: snap,
+            user: { name: user?.name || user?.username || 'Collaborator' }
+          });
+        }
+        return snap;
+      }
+    } catch (err) {
+      console.warn('Error saving snapshot:', err.message);
+    }
+  };
+
+  const revertToSnapshot = async (snapshotId) => {
+    try {
+      const netId = network?.id || network?._id || network?.roomId || 'demo';
+      const res = await networkAPI.restoreSnapshot(netId, snapshotId);
+      if (res.data?.success) {
+        const restored = res.data.data;
+        isUndoRedoRef.current = true;
+        setNodes(restored.nodes);
+        setEdges(restored.edges);
+        recordHistory(restored.nodes, restored.edges);
+        setSelectedNode(null);
+        setTimeout(() => { isUndoRedoRef.current = false; }, 50);
+
+        if (collaborationActive && network?.roomId) {
+          const socket = getSocket();
+          socket.emit('snapshot-restored', {
+            roomId: network.roomId,
+            snapshot: { id: restored.snapshotId, name: restored.snapshotName },
+            nodes: restored.nodes,
+            edges: restored.edges,
+            user: { name: user?.name || user?.username || 'Collaborator' }
+          });
+        }
+        return restored;
+      }
+    } catch (err) {
+      console.warn('Error restoring snapshot:', err.message);
+    }
+  };
+
+  const compareVersions = async (snapshotAId, snapshotBId) => {
+    try {
+      const netId = network?.id || network?._id || network?.roomId || 'demo';
+      const res = await networkAPI.compareSnapshots(netId, {
+        snapshotAId,
+        snapshotBId,
+        currentNodes: nodes,
+        currentEdges: edges
+      });
+      if (res.data?.success) {
+        setDiffResult(res.data.data);
+        return res.data.data;
+      }
+    } catch (err) {
+      console.warn('Error comparing snapshots:', err.message);
+    }
+  };
+
   // Socket.IO Room Setup & Real-time Collaboration Listeners
   // Deferred until the workspace calls activateCollaboration(), so the Socket.IO
   // client (and its connection attempts) are never started on the landing / auth
@@ -537,6 +657,20 @@ export const NetworkProvider = ({ children }) => {
       playSimulationAnimation(simResult);
     };
 
+    const handleSnapshotSynced = ({ snapshot }) => {
+      if (snapshot) setSnapshots(prev => [snapshot, ...prev]);
+    };
+
+    const handleSnapshotRestoredSynced = ({ snapshot, nodes: restoredNodes, edges: restoredEdges }) => {
+      if (restoredNodes) {
+        isUndoRedoRef.current = true;
+        setNodes(restoredNodes);
+        if (restoredEdges) setEdges(restoredEdges);
+        setSelectedNode(null);
+        setTimeout(() => { isUndoRedoRef.current = false; }, 50);
+      }
+    };
+
     socket.on('room-users', handleRoomUsers);
     socket.on('activity-updated', handleActivityUpdated);
     socket.on('chat-history', handleChatHistory);
@@ -547,6 +681,8 @@ export const NetworkProvider = ({ children }) => {
     socket.on('edge-synced', handleEdgeSynced);
     socket.on('config-synced', handleConfigSynced);
     socket.on('simulation-triggered', handleSimulationTriggered);
+    socket.on('snapshot-synced', handleSnapshotSynced);
+    socket.on('snapshot-restored-synced', handleSnapshotRestoredSynced);
 
     return () => {
       socket.off('room-users', handleRoomUsers);
@@ -559,6 +695,8 @@ export const NetworkProvider = ({ children }) => {
       socket.off('edge-synced', handleEdgeSynced);
       socket.off('config-synced', handleConfigSynced);
       socket.off('simulation-triggered', handleSimulationTriggered);
+      socket.off('snapshot-synced', handleSnapshotSynced);
+      socket.off('snapshot-restored-synced', handleSnapshotRestoredSynced);
     };
   }, [collaborationActive, network?.roomId, user]);
 
@@ -638,8 +776,11 @@ export const NetworkProvider = ({ children }) => {
         isSimulating,
         simulationResult,
         activeStepIndex,
+        setActiveStepIndex,
         activeNodeId,
+        setActiveNodeId,
         activeEdgeId,
+        setActiveEdgeId,
         playSimulationAnimation,
         simulationHistory,
         setSimulationHistory,
@@ -649,7 +790,17 @@ export const NetworkProvider = ({ children }) => {
         chatMessages,
         sendChatMessage,
         activateCollaboration,
-        deactivateCollaboration
+        deactivateCollaboration,
+        snapshots,
+        fetchSnapshots,
+        takeSnapshot,
+        revertToSnapshot,
+        compareVersions,
+        diffResult,
+        setDiffResult,
+        selectedSnapshot,
+        setSelectedSnapshot,
+        isLoadingSnapshots
       }}
     >
       {children}

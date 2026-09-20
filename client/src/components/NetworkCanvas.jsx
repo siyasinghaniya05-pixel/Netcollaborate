@@ -209,11 +209,7 @@ const NetworkCanvasInner = () => {
 };
 
 const NetworkCanvas = () => {
-  return (
-    <ReactFlowProvider>
-      <NetworkCanvasInner />
-    </ReactFlowProvider>
-  );
+  return <NetworkCanvasInner />;
 };
 
 export default NetworkCanvas;

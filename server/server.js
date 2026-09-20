@@ -8,6 +8,9 @@ const { Server } = require('socket.io');
 const authRoutes = require('./routes/authRoutes');
 const networkRoutes = require('./routes/networkRoutes');
 const userRoutes = require('./routes/userRoutes');
+const modulationRoutes = require('./routes/modulationRoutes');
+const labRoutes = require('./routes/labRoutes');
+const experimentRoutes = require('./routes/experimentRoutes');
 
 const app = express();
 const server = http.createServer(app);
@@ -39,6 +42,10 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/networks', networkRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/modulation', modulationRoutes);
+app.use('/api/labs', labRoutes);
+app.use('/api/instructor', labRoutes);
+app.use('/api/experiments', experimentRoutes);
 
 // In-memory room tracking for real-time collaboration
 const activeRooms = new Map(); // roomId -> { users: Map(socketId -> userData), activityLog: [], messages: [] }
@@ -62,12 +69,37 @@ function getRoom(roomId) {
   return activeRooms.get(roomId);
 }
 
+// Socket.IO Handshake Authentication Middleware
+const jwt = require('jsonwebtoken');
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token ||
+    (socket.handshake.headers?.authorization?.startsWith('Bearer ') ? socket.handshake.headers.authorization.split(' ')[1] : null);
+
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'netcollaborate_secret_fallback');
+      socket.userId = decoded.userId || decoded.id;
+      socket.role = decoded.role || 'student';
+      socket.userName = decoded.name || decoded.username;
+    } catch (err) {
+      console.warn('[Socket Auth] Invalid token provided, proceeding as guest student');
+      socket.userId = 'guest_' + socket.id;
+      socket.role = 'student';
+    }
+  } else {
+    socket.userId = 'guest_' + socket.id;
+    socket.role = 'student';
+  }
+  next();
+});
+
 // Socket.IO Events
 io.on('connection', (socket) => {
   let currentRoomId = null;
   let currentUser = null;
+  let currentSessionCode = null;
 
-  // Join network room
+  // Join network workspace room
   socket.on('join-room', ({ roomId, user }) => {
     if (!roomId || !user) return;
     currentRoomId = roomId;
@@ -82,6 +114,7 @@ io.on('connection', (socket) => {
       userId: user.id || user._id,
       name: user.name || user.username || 'Collaborator',
       username: user.username || 'collaborator',
+      role: user.role || socket.role || 'student',
       avatarColor: user.avatarColor || '#3b82f6',
       cursor: { x: 0, y: 0 }
     });
@@ -103,6 +136,104 @@ io.on('connection', (socket) => {
     socket.emit('chat-history', room.messages);
 
     console.log(`[Socket] User ${user.username} joined room ${roomId} (Total: ${userList.length})`);
+  });
+
+  // Track session room membership for 50-student lab count
+  socket.on('join-lab', ({ sessionCode, student, role }) => {
+    if (!sessionCode) return;
+    const cleanCode = sessionCode.toUpperCase();
+    currentSessionCode = cleanCode;
+    const labRoom = `lab-${cleanCode}`;
+    const monitorRoom = `instructor-monitor-${cleanCode}`;
+
+    const userRole = role || socket.role || 'student';
+
+    if (userRole === 'instructor') {
+      socket.join(monitorRoom);
+      console.log(`[Socket] Instructor joined monitoring room: ${monitorRoom}`);
+    } else {
+      socket.join(labRoom);
+      // Notify instructor monitoring room of new student
+      io.to(monitorRoom).emit('student-joined', {
+        student: student || { studentId: socket.userId, name: socket.userName, role: 'student' },
+        timestamp: new Date().toLocaleTimeString()
+      });
+
+      // Get count of students in lab room
+      const studentCount = io.sockets.adapter.rooms.get(labRoom)?.size || 1;
+      io.to(monitorRoom).emit('student-count-updated', { count: studentCount });
+      io.to(labRoom).emit('student-count-updated', { count: studentCount });
+
+      console.log(`[Socket] Student ${student?.name || socket.userName} joined lab ${labRoom} (Count: ${studentCount})`);
+    }
+  });
+
+  socket.on('leave-lab', ({ sessionCode, student }) => {
+    if (!sessionCode) return;
+    const cleanCode = sessionCode.toUpperCase();
+    const labRoom = `lab-${cleanCode}`;
+    const monitorRoom = `instructor-monitor-${cleanCode}`;
+
+    socket.leave(labRoom);
+    socket.leave(monitorRoom);
+
+    io.to(monitorRoom).emit('student-left', {
+      student,
+      timestamp: new Date().toLocaleTimeString()
+    });
+
+    const studentCount = io.sockets.adapter.rooms.get(labRoom)?.size || 0;
+    io.to(monitorRoom).emit('student-count-updated', { count: studentCount });
+    io.to(labRoom).emit('student-count-updated', { count: studentCount });
+  });
+
+  // Real-time Student Progress broadcast to Instructor Monitoring Room
+  socket.on('student-progress-update', ({ sessionCode, progressData }) => {
+    if (!sessionCode) return;
+    const cleanCode = sessionCode.toUpperCase();
+    const monitorRoom = `instructor-monitor-${cleanCode}`;
+    io.to(monitorRoom).emit('student-progress-broadcast', progressData);
+  });
+
+  // Real-time Experiment lifecycle alerts for instructor
+  socket.on('experiment-started', ({ sessionCode, student, experimentName }) => {
+    if (!sessionCode) return;
+    const monitorRoom = `instructor-monitor-${sessionCode.toUpperCase()}`;
+    io.to(monitorRoom).emit('experiment-started-alert', {
+      student,
+      experimentName,
+      timestamp: new Date().toLocaleTimeString()
+    });
+  });
+
+  socket.on('experiment-completed', ({ sessionCode, student, results }) => {
+    if (!sessionCode) return;
+    const monitorRoom = `instructor-monitor-${sessionCode.toUpperCase()}`;
+    io.to(monitorRoom).emit('experiment-completed-alert', {
+      student,
+      results,
+      timestamp: new Date().toLocaleTimeString()
+    });
+  });
+
+  socket.on('fsk-result-updated', ({ sessionCode, student, ber, params }) => {
+    if (!sessionCode) return;
+    const monitorRoom = `instructor-monitor-${sessionCode.toUpperCase()}`;
+    io.to(monitorRoom).emit('fsk-result-alert', {
+      student,
+      ber,
+      params,
+      timestamp: new Date().toLocaleTimeString()
+    });
+  });
+
+  socket.on('submission-received', ({ sessionCode, submission }) => {
+    if (!sessionCode) return;
+    const monitorRoom = `instructor-monitor-${sessionCode.toUpperCase()}`;
+    io.to(monitorRoom).emit('submission-alert', {
+      submission,
+      timestamp: new Date().toLocaleTimeString()
+    });
   });
 
   // Collaborative Cursor Tracking
@@ -232,6 +363,63 @@ io.on('connection', (socket) => {
     if (room.messages.length > 100) room.messages.shift();
 
     io.to(roomId).emit('new-message', msg);
+  });
+
+  // Version Control Snapshot events
+  socket.on('snapshot-created', ({ roomId, snapshot, user }) => {
+    if (!roomId || !snapshot) return;
+    const room = getRoom(roomId);
+    const uName = user?.name || currentUser?.name || 'Collaborator';
+
+    const logEntry = {
+      id: 'log-' + Date.now(),
+      username: uName,
+      action: 'Created Snapshot',
+      details: `${uName} captured version checkpoint: "${snapshot.name}"`,
+      timestamp: new Date().toLocaleTimeString()
+    };
+    room.activityLog.unshift(logEntry);
+    if (room.activityLog.length > 50) room.activityLog.pop();
+
+    socket.to(roomId).emit('snapshot-synced', { snapshot, user });
+    io.to(roomId).emit('activity-updated', room.activityLog);
+  });
+
+  socket.on('snapshot-restored', ({ roomId, snapshot, nodes, edges, user }) => {
+    if (!roomId) return;
+    const room = getRoom(roomId);
+    const uName = user?.name || currentUser?.name || 'Collaborator';
+
+    const logEntry = {
+      id: 'log-' + Date.now(),
+      username: uName,
+      action: 'Restored Version',
+      details: `${uName} restored network to snapshot "${snapshot?.name || 'checkpoint'}"`,
+      timestamp: new Date().toLocaleTimeString()
+    };
+    room.activityLog.unshift(logEntry);
+    if (room.activityLog.length > 50) room.activityLog.pop();
+
+    socket.to(roomId).emit('snapshot-restored-synced', { snapshot, nodes, edges, user });
+    io.to(roomId).emit('activity-updated', room.activityLog);
+  });
+
+
+  // FSK Real-time Collaborative Simulation Broadcast
+  socket.on('fsk-simulation-started', ({ roomId, params, user }) => {
+    if (!roomId) return;
+    socket.to(roomId).emit('fsk-simulation-started-synced', { params, user });
+  });
+
+  socket.on('fsk-simulation-completed', ({ roomId, results, user }) => {
+    if (!roomId) return;
+    socket.to(roomId).emit('fsk-simulation-completed-synced', { results, user });
+  });
+
+  // FSK Parameter Sync
+  socket.on('fsk-param-change', ({ roomId, params, user }) => {
+    if (!roomId) return;
+    socket.to(roomId).emit('fsk-param-synced', { params, user });
   });
 
   // Disconnect handler

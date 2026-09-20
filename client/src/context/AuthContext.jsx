@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { authAPI } from '../services/api';
+import { disconnectSocket } from '../services/socket';
 
 const AuthContext = createContext(null);
 
@@ -15,19 +16,22 @@ export const AuthProvider = ({ children }) => {
 
       if (storedToken && storedUser) {
         try {
-          setUser(JSON.parse(storedUser));
-          setToken(storedToken);
-          // Refresh user profile if not guest
           const parsed = JSON.parse(storedUser);
-          if (!parsed.isGuest) {
-            const res = await authAPI.getMe();
-            if (res.data?.user) {
-              setUser(res.data.user);
-              localStorage.setItem('user', JSON.stringify(res.data.user));
-            }
+          setUser(parsed);
+          setToken(storedToken);
+
+          // Authoritative verification from backend
+          const res = await authAPI.getMe();
+          if (res.data?.user) {
+            setUser(res.data.user);
+            localStorage.setItem('user', JSON.stringify(res.data.user));
           }
         } catch (err) {
-          console.warn('Failed to verify token, clearing session:', err.message);
+          console.warn('Session verification failed or expired:', err.message);
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          setUser(null);
+          setToken(null);
         }
       }
       setLoading(false);
@@ -36,8 +40,8 @@ export const AuthProvider = ({ children }) => {
     initAuth();
   }, []);
 
-  const login = async (email, password) => {
-    const res = await authAPI.login({ email, password });
+  const login = async (email, password, role) => {
+    const res = await authAPI.login({ email, password, role });
     if (res.data?.success) {
       setUser(res.data.user);
       setToken(res.data.token);
@@ -74,13 +78,21 @@ export const AuthProvider = ({ children }) => {
     setToken(null);
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    disconnectSocket();
   };
+
+  const role = user?.role || 'student';
+  const isStudent = role === 'student';
+  const isInstructor = role === 'instructor';
 
   return (
     <AuthContext.Provider
       value={{
         user,
         token,
+        role,
+        isStudent,
+        isInstructor,
         isAuthenticated: Boolean(user && token),
         isGuest: Boolean(user?.isGuest),
         loading,

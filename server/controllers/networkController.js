@@ -1,6 +1,12 @@
 const Network = require('../models/Network');
 const { validateTopology } = require('../simulation/validator');
 const { simulatePacket, simulatePing } = require('../simulation/packetSimulator');
+const { netAssistAnalyze, runFullDiagnostics } = require('../simulation/netassist');
+const { traceRoute } = require('../simulation/traceroute');
+const { buildReplay } = require('../simulation/packetReplay');
+const { createSnapshot, compareSnapshots, restoreSnapshot } = require('../simulation/versionControl');
+const { generateLabReport } = require('../simulation/reportGenerator');
+const { evaluateAssignment, getSampleSubmissions, aggregateClassMetrics, ASSIGNMENTS } = require('../simulation/instructorEngine');
 
 // In-memory network store fallback when MongoDB is not connected
 const memoryNetworks = new Map();
@@ -394,6 +400,48 @@ const simulate = async (req, res) => {
   }
 };
 
+// @desc    Run a traceroute simulation
+// @route   POST /api/networks/:id/traceroute
+const traceroute = async (req, res) => {
+  try {
+    const { nodes, edges, sourceId, destIdOrIP, maxHops } = req.body;
+
+    if (!sourceId || !destIdOrIP) {
+      return res.status(400).json({ success: false, message: 'Source and target devices are required' });
+    }
+
+    const result = traceRoute(nodes || [], edges || [], sourceId, destIdOrIP, maxHops || 15);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Build a packet-replay journey from a simulation result
+// @route   POST /api/networks/:id/replay
+const packetReplay = async (req, res) => {
+  try {
+    const { nodes, edges, sourceId, destId, protocol, ttl } = req.body;
+
+    if (!sourceId || !destId) {
+      return res.status(400).json({ success: false, message: 'Source and destination devices are required' });
+    }
+
+    const simResult = simulatePacket(nodes || [], edges || [], sourceId, destId, protocol || 'ICMP', ttl || 64);
+    const replay = buildReplay(nodes || [], edges || [], simResult);
+
+    res.json({
+      success: true,
+      data: {
+        replay,
+        simulation: simResult
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // @desc    Run Ping simulation
 // @route   POST /api/networks/:id/ping
 const ping = async (req, res) => {
@@ -423,6 +471,285 @@ const debugTopology = async (req, res) => {
   }
 };
 
+// @desc    NetAssist — answer a natural-language troubleshooting question
+// @route   POST /api/networks/:id/assist
+const netAssist = async (req, res) => {
+  try {
+    const { nodes, edges, question } = req.body;
+    if (!question || !String(question).trim()) {
+      return res.status(400).json({ success: false, message: 'A question is required' });
+    }
+    const answer = netAssistAnalyze(nodes || [], edges || [], question);
+    res.json({ success: true, data: answer });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    NetAssist — full smart diagnostic pass (issues + fixes + health)
+// @route   POST /api/networks/:id/assist/diagnostics
+const netAssistDiagnostics = async (req, res) => {
+  try {
+    const { nodes, edges } = req.body;
+    const issues = runFullDiagnostics(nodes || [], edges || []);
+    const diagnostics = validateTopology(nodes || [], edges || []);
+    res.json({
+      success: true,
+      data: {
+        issues,
+        validation: diagnostics,
+        healthScore: diagnostics.healthScore
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Helper to resolve network from DB, memory store, or fallback
+async function resolveNetwork(id, fallbackNodes, fallbackEdges) {
+  if (id === 'demo' || id === 'demo-enterprise-network' || id === 'NET-DEMO01') {
+    return demoNetworkData;
+  }
+  let network = null;
+  try {
+    network = await Network.findOne({ $or: [{ _id: id }, { roomId: id }] });
+  } catch (err) {
+    network = memoryNetworks.get(id);
+  }
+  if (!network) {
+    network = memoryNetworks.get(id);
+  }
+  if (!network && fallbackNodes) {
+    network = {
+      id: id || 'active-network',
+      name: 'Active Network',
+      nodes: fallbackNodes,
+      edges: fallbackEdges || [],
+      snapshots: []
+    };
+  }
+  return network;
+}
+
+// @desc    Get all snapshots for a network
+// @route   GET /api/networks/:id/snapshots
+const getSnapshots = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const network = await resolveNetwork(id);
+    if (!network) {
+      return res.status(404).json({ success: false, message: 'Network not found' });
+    }
+    const snapshots = network.snapshots || [];
+    res.json({ success: true, count: snapshots.length, data: snapshots });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Create a snapshot
+// @route   POST /api/networks/:id/snapshots
+const createSnapshotHandler = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description, nodes, edges, healthScore } = req.body;
+    const author = req.user?.name || req.user?.username || 'Collaborator';
+
+    let network = await resolveNetwork(id, nodes, edges);
+    if (!network) {
+      return res.status(404).json({ success: false, message: 'Network not found' });
+    }
+
+    const targetNodes = nodes && nodes.length > 0 ? nodes : (network.nodes || []);
+    const targetEdges = edges !== undefined ? edges : (network.edges || []);
+
+    const snapshot = createSnapshot(targetNodes, targetEdges, {
+      name,
+      description,
+      author,
+      healthScore
+    });
+
+    if (!network.snapshots) {
+      network.snapshots = [];
+    }
+    network.snapshots.unshift(snapshot);
+
+    try {
+      if (network.save && typeof network.save === 'function') {
+        await network.save();
+      }
+    } catch (e) {}
+
+    memoryNetworks.set(id, network);
+
+    res.status(201).json({ success: true, data: snapshot });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Compare two snapshots or current network vs a snapshot
+// @route   POST /api/networks/:id/snapshots/compare
+const compareSnapshotsHandler = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { snapshotAId, snapshotBId, currentNodes, currentEdges } = req.body;
+
+    const network = await resolveNetwork(id, currentNodes, currentEdges);
+    const snapshots = network?.snapshots || [];
+
+    let snapA = null;
+    let snapB = null;
+
+    if (snapshotAId === 'current') {
+      snapA = { nodes: currentNodes || network?.nodes || [], edges: currentEdges || network?.edges || [] };
+    } else {
+      snapA = snapshots.find(s => s.id === snapshotAId);
+    }
+
+    if (snapshotBId === 'current') {
+      snapB = { nodes: currentNodes || network?.nodes || [], edges: currentEdges || network?.edges || [] };
+    } else {
+      snapB = snapshots.find(s => s.id === snapshotBId);
+    }
+
+    if (!snapA && snapshots.length > 0) snapA = snapshots[snapshots.length - 1];
+    if (!snapB && snapshots.length > 0) snapB = snapshots[0];
+    if (!snapA) snapA = { nodes: [], edges: [] };
+    if (!snapB) snapB = { nodes: currentNodes || [], edges: currentEdges || [] };
+
+    const diff = compareSnapshots(snapA, snapB);
+    res.json({
+      success: true,
+      data: {
+        diff,
+        baseline: { id: snapA.id || 'snapshot-a', name: snapA.name || 'Baseline' },
+        target: { id: snapB.id || 'snapshot-b', name: snapB.name || 'Target' }
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Restore a snapshot
+// @route   POST /api/networks/:id/snapshots/:snapshotId/restore
+const restoreSnapshotHandler = async (req, res) => {
+  try {
+    const { id, snapshotId } = req.params;
+    const network = await resolveNetwork(id);
+    if (!network) {
+      return res.status(404).json({ success: false, message: 'Network not found' });
+    }
+
+    const snapshot = (network.snapshots || []).find(s => s.id === snapshotId);
+    if (!snapshot) {
+      return res.status(404).json({ success: false, message: 'Snapshot not found' });
+    }
+
+    const restored = restoreSnapshot(snapshot);
+    network.nodes = restored.nodes;
+    network.edges = restored.edges;
+
+    try {
+      if (network.save && typeof network.save === 'function') {
+        await network.save();
+      }
+    } catch (e) {}
+
+    memoryNetworks.set(id, network);
+
+    res.json({ success: true, data: restored });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Generate a comprehensive lab report
+// @route   POST /api/networks/:id/report
+const getLabReportHandler = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { studentName, studentId, courseName, labTitle, instructorComments, gradeOverride, nodes, edges } = req.body || {};
+
+    let network = await resolveNetwork(id, nodes, edges);
+    if (!network) {
+      return res.status(404).json({ success: false, message: 'Network not found' });
+    }
+
+    const reportTarget = {
+      ...network,
+      nodes: nodes && nodes.length > 0 ? nodes : (network.nodes || []),
+      edges: edges !== undefined ? edges : (network.edges || [])
+    };
+
+    const report = generateLabReport(reportTarget, {
+      studentName: studentName || req.user?.name || req.user?.username || 'Student Engineer',
+      studentId: studentId || (req.user?.id ? `STU-${req.user.id.toString().slice(-6).toUpperCase()}` : undefined),
+      courseName,
+      labTitle,
+      instructorComments,
+      gradeOverride
+    });
+
+    res.json({ success: true, data: report });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// In-memory submissions store for instructor dashboard
+let instructorSubmissions = getSampleSubmissions();
+
+// @desc    Get instructor assignments catalog
+// @route   GET /api/networks/instructor/assignments
+const getInstructorAssignmentsHandler = (req, res) => {
+  res.json({ success: true, data: ASSIGNMENTS });
+};
+
+// @desc    Get all student lab submissions & class metrics
+// @route   GET /api/networks/instructor/submissions
+const getInstructorSubmissionsHandler = async (req, res) => {
+  try {
+    const metrics = aggregateClassMetrics(instructorSubmissions);
+    res.json({
+      success: true,
+      data: {
+        submissions: instructorSubmissions,
+        metrics,
+        assignments: ASSIGNMENTS
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Grade or update feedback on a student submission
+// @route   PUT /api/networks/instructor/submissions/:submissionId
+const gradeSubmissionHandler = async (req, res) => {
+  try {
+    const { submissionId } = req.params;
+    const { score, feedback, status, letterGrade } = req.body;
+
+    const sub = instructorSubmissions.find(s => s.id === submissionId);
+    if (!sub) {
+      return res.status(404).json({ success: false, message: 'Submission not found' });
+    }
+
+    if (score !== undefined) sub.score = Number(score);
+    if (feedback !== undefined) sub.feedback = feedback;
+    if (status !== undefined) sub.status = status;
+    if (letterGrade !== undefined) sub.letterGrade = letterGrade;
+
+    res.json({ success: true, data: sub });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   getNetworks,
   getNetworkById,
@@ -431,7 +758,19 @@ module.exports = {
   deleteNetwork,
   simulate,
   ping,
+  traceroute,
+  packetReplay,
   debugTopology,
+  netAssist,
+  netAssistDiagnostics,
+  getSnapshots,
+  createSnapshotHandler,
+  compareSnapshotsHandler,
+  restoreSnapshotHandler,
+  getLabReportHandler,
+  getInstructorAssignmentsHandler,
+  getInstructorSubmissionsHandler,
+  gradeSubmissionHandler,
   demoNetworkData,
   memoryNetworks
 };

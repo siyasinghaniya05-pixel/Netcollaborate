@@ -9,12 +9,14 @@ import {
   Send,
   CheckCircle2,
   AlertTriangle,
-  RotateCcw
+  RotateCcw,
+  History,
+  FileText
 } from 'lucide-react';
 import { useReactFlow } from 'reactflow';
 import { useNetwork } from '../context/NetworkContext';
 
-const Toolbar = ({ onOpenSimulation, onOpenDiagnostics }) => {
+const Toolbar = ({ onOpenSimulation, onOpenDiagnostics, onOpenHistory, onOpenLabReport }) => {
   const {
     network,
     setNetwork,
@@ -220,6 +222,28 @@ const Toolbar = ({ onOpenSimulation, onOpenDiagnostics }) => {
           <Save size={14} />
           <span>Save</span>
         </button>
+
+        {onOpenHistory && (
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={onOpenHistory}
+            title="Snapshots & Version Control Diff"
+          >
+            <History size={14} />
+            <span>History</span>
+          </button>
+        )}
+
+        {onOpenLabReport && (
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={onOpenLabReport}
+            title="Generate & Export PDF Lab Report"
+          >
+            <FileText size={14} />
+            <span>Lab Report</span>
+          </button>
+        )}
 
         <button
           className="btn btn-secondary btn-sm"

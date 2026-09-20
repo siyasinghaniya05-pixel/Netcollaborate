@@ -12,10 +12,17 @@ import {
   LogOut,
   LayoutDashboard,
   User as UserIcon,
-  HelpCircle
+  GraduationCap,
+  Radio,
+  Search,
+  KeyRound
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNetwork } from '../context/NetworkContext';
+import JoinLabModal from './JoinLabModal';
+import ExperimentLibraryModal from './ExperimentLibraryModal';
+import NetworkDetectiveModal from './NetworkDetectiveModal';
+import QuizModal from './QuizModal';
 
 const Navbar = ({ onOpenQuiz, onOpenLearn }) => {
   const { user, logout, isAuthenticated } = useAuth();
@@ -23,6 +30,12 @@ const Navbar = ({ onOpenQuiz, onOpenLearn }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [copied, setCopied] = useState(false);
+
+  // Global Navigation Modals
+  const [showJoinModal, setShowJoinModal] = useState(false);
+  const [showExpModal, setShowExpModal] = useState(false);
+  const [showDetectiveModal, setShowDetectiveModal] = useState(false);
+  const [showQuizModal, setShowQuizModal] = useState(false);
 
   const handleCopyRoom = () => {
     if (network?.roomId) {
@@ -110,10 +123,10 @@ const Navbar = ({ onOpenQuiz, onOpenLearn }) => {
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
         {isAuthenticated && (
           <Link
-            to="/dashboard"
+            to={user?.role === 'instructor' ? '/instructor/dashboard' : '/student/dashboard'}
             className="btn btn-ghost btn-sm"
             style={{
-              color: location.pathname === '/dashboard' ? 'var(--primary)' : 'var(--text-secondary)'
+              color: location.pathname.includes('dashboard') ? 'var(--primary)' : 'var(--text-secondary)'
             }}
           >
             <LayoutDashboard size={15} />
@@ -132,19 +145,62 @@ const Navbar = ({ onOpenQuiz, onOpenLearn }) => {
           <span>Workspace</span>
         </Link>
 
-        {onOpenLearn && (
-          <button className="btn btn-ghost btn-sm" onClick={onOpenLearn}>
-            <BookOpen size={15} />
-            <span>Learn</span>
+
+        <button
+          className="btn btn-ghost btn-sm"
+          onClick={() => setShowExpModal(true)}
+          title="Digital Communication & Networking Experiment Catalog"
+        >
+          <BookOpen size={15} color="#06b6d4" />
+          <span>Experiments (9)</span>
+        </button>
+
+        <button
+          className="btn btn-ghost btn-sm"
+          onClick={() => setShowDetectiveModal(true)}
+          title="Network Detective Challenge Mode"
+        >
+          <Search size={15} color="#ef4444" />
+          <span>Detective</span>
+        </button>
+
+        {user?.role === 'instructor' ? (
+          <Link
+            to="/instructor/dashboard"
+            className="btn btn-ghost btn-sm"
+            style={{
+              color: location.pathname.includes('instructor') ? '#8b5cf6' : 'var(--text-secondary)'
+            }}
+            title="Instructor Assessment & Grading Portal"
+          >
+            <GraduationCap size={15} color="#8b5cf6" />
+            <span style={{ color: '#8b5cf6', fontWeight: 700 }}>Instructor Portal</span>
+          </Link>
+        ) : (
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => setShowJoinModal(true)}
+            style={{
+              padding: '4px 10px',
+              fontSize: '0.78rem',
+              background: 'linear-gradient(135deg, #0284c7 0%, #06b6d4 100%)',
+              border: 'none'
+            }}
+            title="Join Session via Session Code or QR Code"
+          >
+            <KeyRound size={13} />
+            <span>Join Lab</span>
           </button>
         )}
 
-        {onOpenQuiz && (
-          <button className="btn btn-ghost btn-sm" onClick={onOpenQuiz}>
-            <Award size={15} />
-            <span>Quiz Challenge</span>
-          </button>
-        )}
+        <button
+          className="btn btn-ghost btn-sm"
+          onClick={onOpenQuiz || (() => setShowQuizModal(true))}
+          title="Interactive Networking Quiz Challenge"
+        >
+          <Award size={15} color="#eab308" />
+          <span>Quiz</span>
+        </button>
       </div>
 
       {/* Right Controls: Theme Toggle & User Auth */}
@@ -172,10 +228,10 @@ const Navbar = ({ onOpenQuiz, onOpenLearn }) => {
             >
               <div
                 style={{
-                  width: '28px',
-                  height: '28px',
+                  width: '26px',
+                  height: '26px',
                   borderRadius: '50%',
-                  backgroundColor: user?.avatarColor || 'var(--primary)',
+                  backgroundColor: user?.role === 'instructor' ? '#8b5cf6' : (user?.avatarColor || 'var(--primary)'),
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -188,6 +244,19 @@ const Navbar = ({ onOpenQuiz, onOpenLearn }) => {
               </div>
               <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>
                 {user?.name || user?.username}
+              </span>
+              <span
+                style={{
+                  fontSize: '0.68rem',
+                  fontWeight: 700,
+                  padding: '2px 6px',
+                  borderRadius: '10px',
+                  backgroundColor: user?.role === 'instructor' ? 'rgba(139, 92, 246, 0.2)' : 'rgba(2, 132, 199, 0.2)',
+                  color: user?.role === 'instructor' ? '#a78bfa' : '#38bdf8',
+                  textTransform: 'uppercase'
+                }}
+              >
+                {user?.role || 'student'}
               </span>
             </Link>
 
@@ -213,6 +282,27 @@ const Navbar = ({ onOpenQuiz, onOpenLearn }) => {
           </div>
         )}
       </div>
+
+      {showJoinModal && (
+        <JoinLabModal
+          onClose={() => setShowJoinModal(false)}
+          onJoined={(session, student) => {
+            navigate(`/lab/${session.sessionCode || 'NC-FSK-7A42'}`);
+          }}
+        />
+      )}
+
+      {showExpModal && (
+        <ExperimentLibraryModal onClose={() => setShowExpModal(false)} />
+      )}
+
+      {showDetectiveModal && (
+        <NetworkDetectiveModal onClose={() => setShowDetectiveModal(false)} />
+      )}
+
+      {showQuizModal && (
+        <QuizModal onClose={() => setShowQuizModal(false)} />
+      )}
     </nav>
   );
 };

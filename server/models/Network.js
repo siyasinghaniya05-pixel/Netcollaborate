@@ -76,6 +76,18 @@ const NetworkSchema = new mongoose.Schema({
     min: 0,
     max: 100
   },
+  snapshots: [
+    {
+      id: String,
+      name: String,
+      description: String,
+      author: String,
+      createdAt: { type: Date, default: Date.now },
+      stats: mongoose.Schema.Types.Mixed,
+      nodes: Array,
+      edges: Array
+    }
+  ],
   stats: {
     devicesCount: { type: Number, default: 0 },
     connectionsCount: { type: Number, default: 0 },

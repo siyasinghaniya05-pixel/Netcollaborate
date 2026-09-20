@@ -9,12 +9,18 @@ import {
   Clock,
   ArrowRight,
   ShieldAlert,
-  Sliders
+  Sliders,
+  Route,
+  Radio,
+  Zap,
+  Activity
 } from 'lucide-react';
 import { useNetwork } from '../context/NetworkContext';
 import { networkAPI } from '../services/api';
 import { getSocket } from '../services/socket';
 import { useAuth } from '../context/AuthContext';
+import TraceroutePanel from './TraceroutePanel';
+import { runFskPipeline, parseBits, textToBits } from '../utils/fskModulation';
 
 const SimulationPanel = ({ onClose }) => {
   const {
@@ -29,7 +35,7 @@ const SimulationPanel = ({ onClose }) => {
   } = useNetwork();
   const { user } = useAuth();
 
-  const [activeTab, setActiveTab] = useState('packet'); // 'packet' | 'ping' | 'history'
+  const [activeTab, setActiveTab] = useState('packet'); // 'packet' | 'fsk' | 'ping' | 'history' | 'traceroute'
 
   // Packet Simulator State
   const [sourceId, setSourceId] = useState(nodes[0]?.id || '');
@@ -37,6 +43,14 @@ const SimulationPanel = ({ onClose }) => {
   const [protocol, setProtocol] = useState('ICMP');
   const [ttl, setTtl] = useState(64);
   const [packetLoading, setPacketLoading] = useState(false);
+
+  // FSK Integrated State
+  const [fskBits, setFskBits] = useState('10110010');
+  const [fskF0, setFskF0] = useState(1000);
+  const [fskF1, setFskF1] = useState(2000);
+  const [fskNoise, setFskNoise] = useState(5);
+  const [fskResult, setFskResult] = useState(null);
+  const [fskLoading, setFskLoading] = useState(false);
 
   // Ping Console State
   const [pingSourceId, setPingSourceId] = useState(nodes[0]?.id || '');
@@ -103,6 +117,76 @@ const SimulationPanel = ({ onClose }) => {
       console.warn('Simulation failed:', err.message);
     } finally {
       setPacketLoading(false);
+    }
+  };
+
+  // Handle Dual-Level FSK Simulation (Network Layer 3 Routing + Physical Layer 1 BFSK Modulation)
+  const handleSendFsk = async () => {
+    if (!sourceId || !destId) return;
+    setFskLoading(true);
+
+    try {
+      // 1. Execute Network Level Packet Journey across topology
+      const res = await networkAPI.simulate(network.id || network._id, {
+        nodes,
+        edges,
+        sourceId,
+        destId,
+        protocol: 'FSK-DATA',
+        ttl
+      });
+
+      // 2. Execute Physical Signal Level Modulation & Demodulation
+      const bits = parseBits(fskBits);
+      const dspResult = runFskPipeline(bits, {
+        f0: fskF0,
+        f1: fskF1,
+        bitDuration: 0.001,
+        noisePercent: fskNoise
+      });
+
+      setFskResult(dspResult);
+
+      if (res.data?.success) {
+        const simData = res.data.data;
+        playSimulationAnimation(simData);
+
+        const sNode = nodes.find(n => n.id === sourceId);
+        const dNode = nodes.find(n => n.id === destId);
+
+        const historyEntry = {
+          id: 'fsk-' + Date.now(),
+          timestamp: new Date(),
+          sourceDevice: sNode?.data?.name || sourceId,
+          destDevice: dNode?.data?.name || destId,
+          protocol: 'BFSK Digital Data',
+          status: dspResult.errors === 0 ? 'Delivered (0% BER)' : `Corrupted (${dspResult.berPercent}% BER)`,
+          durationMs: simData.stats?.latency || 18,
+          hopsCount: simData.hops?.length || 0,
+          reason: `BFSK Modulated Data (${fskBits}) transmitted at f0=${fskF0}Hz, f1=${fskF1}Hz, Noise=${fskNoise}%`
+        };
+
+        setSimulationHistory(prev => [historyEntry, ...prev.slice(0, 40)]);
+
+        // Broadcast to collaborators
+        const socket = getSocket();
+        socket.emit('simulate-broadcast', {
+          roomId: network.roomId,
+          simResult: simData,
+          sourceName: historyEntry.sourceDevice,
+          destName: historyEntry.destDevice,
+          user,
+          fskData: {
+            bits: fskBits,
+            berPercent: dspResult.berPercent,
+            status: dspResult.status
+          }
+        });
+      }
+    } catch (err) {
+      console.warn('FSK Simulation error:', err.message);
+    } finally {
+      setFskLoading(false);
     }
   };
 
@@ -183,6 +267,23 @@ const SimulationPanel = ({ onClose }) => {
         </button>
 
         <button
+          onClick={() => setActiveTab('fsk')}
+          style={{
+            background: 'none',
+            border: 'none',
+            fontSize: '0.8rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            color: activeTab === 'fsk' ? '#38bdf8' : 'var(--text-secondary)'
+          }}
+        >
+          <Radio size={14} color={activeTab === 'fsk' ? '#38bdf8' : 'currentColor'} /> FSK Digital Comms
+        </button>
+
+        <button
           onClick={() => setActiveTab('ping')}
           style={{
             background: 'none',
@@ -214,6 +315,23 @@ const SimulationPanel = ({ onClose }) => {
           }}
         >
           <History size={14} /> Simulation History
+        </button>
+
+        <button
+          onClick={() => setActiveTab('traceroute')}
+          style={{
+            background: 'none',
+            border: 'none',
+            fontSize: '0.8rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            color: activeTab === 'traceroute' ? 'var(--primary)' : 'var(--text-secondary)'
+          }}
+        >
+          <Route size={14} /> Traceroute
         </button>
       </div>
 
@@ -392,6 +510,246 @@ const SimulationPanel = ({ onClose }) => {
         </div>
       )}
 
+      {/* Tab: FSK Integrated Digital Communication */}
+      {activeTab === 'fsk' && (
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden', padding: '1rem', gap: '1.5rem' }}>
+          {/* Controls */}
+          <div style={{ width: '330px', display: 'flex', flexDirection: 'column', gap: '0.75rem', overflowY: 'auto' }}>
+            <div className="input-group" style={{ marginBottom: 0 }}>
+              <label className="input-label">Source Device</label>
+              <select
+                className="input-field"
+                value={sourceId}
+                onChange={(e) => setSourceId(e.target.value)}
+              >
+                {eligibleHosts.map(n => (
+                  <option key={n.id} value={n.id}>
+                    {n.data?.name || n.id} ({n.data?.ip || n.data?.type})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="input-group" style={{ marginBottom: 0 }}>
+              <label className="input-label">Destination Device</label>
+              <select
+                className="input-field"
+                value={destId}
+                onChange={(e) => setDestId(e.target.value)}
+              >
+                {eligibleHosts.map(n => (
+                  <option key={n.id} value={n.id}>
+                    {n.data?.name || n.id} ({n.data?.ip || n.data?.type})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="input-group" style={{ marginBottom: 0 }}>
+              <label className="input-label">Binary Data Payload</label>
+              <input
+                type="text"
+                className="input-field"
+                value={fskBits}
+                onChange={(e) => setFskBits(e.target.value.replace(/[^01]/g, ''))}
+                placeholder="10110010"
+                style={{ fontFamily: 'monospace', fontWeight: 700, color: '#34d399' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <div className="input-group" style={{ flex: 1, marginBottom: 0 }}>
+                <label className="input-label">f0 (Bit 0)</label>
+                <input
+                  type="number"
+                  className="input-field"
+                  value={fskF0}
+                  onChange={(e) => setFskF0(Number(e.target.value))}
+                />
+              </div>
+
+              <div className="input-group" style={{ flex: 1, marginBottom: 0 }}>
+                <label className="input-label">f1 (Bit 1)</label>
+                <input
+                  type="number"
+                  className="input-field"
+                  value={fskF1}
+                  onChange={(e) => setFskF1(Number(e.target.value))}
+                />
+              </div>
+            </div>
+
+            <div className="input-group" style={{ marginBottom: 0 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
+                <label className="input-label" style={{ marginBottom: 0 }}>Channel Noise</label>
+                <span style={{ fontSize: '0.74rem', color: '#f59e0b', fontWeight: 700 }}>{fskNoise}%</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="50"
+                step="5"
+                value={fskNoise}
+                onChange={(e) => setFskNoise(Number(e.target.value))}
+                style={{ width: '100%', accentColor: '#f59e0b' }}
+              />
+            </div>
+
+            <button
+              className="btn btn-primary"
+              style={{
+                marginTop: '0.3rem',
+                background: 'linear-gradient(135deg, #0284c7 0%, #06b6d4 100%)',
+                border: 'none'
+              }}
+              onClick={handleSendFsk}
+              disabled={fskLoading || isSimulating}
+            >
+              <Radio size={16} />
+              <span>{fskLoading ? 'Modulating & Transmitting...' : isSimulating ? 'Animating Across Network...' : 'TRANSMIT FSK SIGNAL'}</span>
+            </button>
+          </div>
+
+          {/* Dual-Level Visualization (Network Level + Signal Level) */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '10px', overflowY: 'auto' }}>
+            {fskResult ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {/* Level 1: Network Hop Journey Summary */}
+                <div style={{
+                  backgroundColor: 'var(--bg-tertiary)',
+                  borderRadius: '8px',
+                  padding: '10px 14px',
+                  border: '1px solid var(--border-color)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '8px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem' }}>
+                    <span style={{ color: '#38bdf8', fontWeight: 700 }}>LEVEL 1 (NETWORK):</span>
+                    <span>{eligibleHosts.find(n => n.id === sourceId)?.data?.name || sourceId}</span>
+                    <ArrowRight size={14} color="var(--text-muted)" />
+                    <span>Routing Hops</span>
+                    <ArrowRight size={14} color="var(--text-muted)" />
+                    <span>{eligibleHosts.find(n => n.id === destId)?.data?.name || destId}</span>
+                  </div>
+                  <span style={{
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    fontSize: '0.74rem',
+                    fontWeight: 700,
+                    backgroundColor: fskResult.errors === 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                    color: fskResult.errors === 0 ? '#10b981' : '#ef4444'
+                  }}>
+                    {fskResult.errors === 0 ? 'SUCCESS • 0% BER' : `CORRUPTED • ${fskResult.berPercent}% BER`}
+                  </span>
+                </div>
+
+                {/* Level 2: Signal Waveform & Demodulated Bits */}
+                <div style={{
+                  backgroundColor: '#0a0f1d',
+                  borderRadius: '8px',
+                  padding: '12px',
+                  border: '1px solid #1e293b',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '10px'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#34d399' }}>
+                      LEVEL 2 (PHYSICAL FSK SIGNAL & CORRELATOR DEMODULATION)
+                    </span>
+                    <div style={{ display: 'flex', gap: '12px', fontSize: '0.72rem' }}>
+                      <span style={{ color: '#38bdf8' }}>SNR: {fskResult.snrDb} dB</span>
+                      <span style={{ color: '#f59e0b' }}>Bandwidth: {fskResult.bandwidthKhz} kHz</span>
+                    </div>
+                  </div>
+
+                  {/* SVG Waveform Trace */}
+                  <div style={{ height: '70px', width: '100%', position: 'relative' }}>
+                    <svg viewBox="0 0 700 60" style={{ width: '100%', height: '100%', overflow: 'visible' }}>
+                      <polyline
+                        fill="none"
+                        stroke="#34d399"
+                        strokeWidth="1.8"
+                        points={fskResult.fskSignal?.slice(0, 400).map((v, i) => `${(i / 400) * 700},${30 - v * 24}`).join(' ')}
+                      />
+                    </svg>
+                  </div>
+
+                  {/* Transmitted vs Received Bits Table */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', minWidth: '90px' }}>Transmitted:</span>
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        {fskResult.bits?.map((b, i) => (
+                          <span key={i} style={{
+                            padding: '2px 7px',
+                            borderRadius: '4px',
+                            backgroundColor: 'rgba(56, 189, 248, 0.2)',
+                            color: '#38bdf8',
+                            fontFamily: 'monospace',
+                            fontSize: '0.85rem',
+                            fontWeight: 700
+                          }}>
+                            {b}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', minWidth: '90px' }}>Recovered:</span>
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        {fskResult.rxBits?.map((b, i) => {
+                          const isErr = fskResult.errorPositions?.includes(i);
+                          return (
+                            <span key={i} style={{
+                              padding: '2px 7px',
+                              borderRadius: '4px',
+                              backgroundColor: isErr ? 'rgba(239, 68, 68, 0.25)' : 'rgba(16, 185, 129, 0.25)',
+                              color: isErr ? '#ef4444' : '#10b981',
+                              fontFamily: 'monospace',
+                              fontSize: '0.85rem',
+                              fontWeight: 700
+                            }}>
+                              {b}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Academic Observation */}
+                {fskResult.observations && (
+                  <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', backgroundColor: 'var(--bg-tertiary)', padding: '8px 12px', borderRadius: '6px' }}>
+                    💡 <strong>Physical Channel Impact:</strong> {fskResult.observations[0]}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--text-muted)',
+                fontSize: '0.85rem',
+                gap: '8px'
+              }}>
+                <Radio size={32} color="var(--text-muted)" />
+                <span>Select Source, Destination and click <strong>TRANSMIT FSK SIGNAL</strong></span>
+                <span style={{ fontSize: '0.76rem' }}>Simulates simultaneous Layer 2/3 packet routing and Layer 1 physical FSK modulation!</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Tab 2: ICMP Ping Terminal */}
       {activeTab === 'ping' && (
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden', padding: '1rem', gap: '1.5rem' }}>
@@ -506,6 +864,13 @@ const SimulationPanel = ({ onClose }) => {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Tab 4: Traceroute */}
+      {activeTab === 'traceroute' && (
+        <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
+          <TraceroutePanel />
         </div>
       )}
     </div>

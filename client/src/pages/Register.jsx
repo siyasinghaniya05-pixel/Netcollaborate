@@ -1,22 +1,24 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Network, User, Mail, Lock, ArrowRight, AlertCircle, UserCheck } from 'lucide-react';
+import { Network, User, Mail, Lock, ArrowRight, AlertCircle, GraduationCap, KeyRound, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import Navbar from '../components/Navbar';
 
 const Register = () => {
-  const { register, loginAsGuest } = useAuth();
+  const { register } = useAuth();
   const navigate = useNavigate();
 
+  const [selectedRole, setSelectedRole] = useState('student'); // 'student' | 'instructor'
   const [formData, setFormData] = useState({
     name: '',
     username: '',
     email: '',
+    rollNumber: '',
+    inviteCode: '',
     password: '',
     confirmPassword: ''
   });
   const [loading, setLoading] = useState(false);
-  const [guestLoading, setGuestLoading] = useState(false);
   const [error, setError] = useState('');
 
   const handleChange = (e) => {
@@ -25,9 +27,9 @@ const Register = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const { name, username, email, password, confirmPassword } = formData;
+    const { name, email, password, confirmPassword, rollNumber, inviteCode } = formData;
 
-    if (!name || !username || !email || !password) {
+    if (!name || !email || !password) {
       setError('Please fill in all required fields');
       return;
     }
@@ -42,28 +44,33 @@ const Register = () => {
       return;
     }
 
+    if (selectedRole === 'instructor' && !inviteCode.trim()) {
+      setError('Instructor invitation code is required to register as faculty.');
+      return;
+    }
+
     setLoading(true);
     setError('');
 
     try {
-      await register({ name, username, email, password });
-      navigate('/dashboard');
+      const res = await register({
+        name,
+        email,
+        password,
+        role: selectedRole,
+        rollNumber: selectedRole === 'student' ? rollNumber : '',
+        inviteCode: selectedRole === 'instructor' ? inviteCode.trim() : ''
+      });
+
+      if (selectedRole === 'instructor') {
+        navigate('/instructor/dashboard');
+      } else {
+        navigate('/student/dashboard');
+      }
     } catch (err) {
       setError(err.response?.data?.message || 'Registration failed. Please try again.');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleGuest = async () => {
-    setGuestLoading(true);
-    try {
-      await loginAsGuest();
-      navigate('/dashboard');
-    } catch (err) {
-      setError('Guest login failed.');
-    } finally {
-      setGuestLoading(false);
     }
   };
 
@@ -76,32 +83,105 @@ const Register = () => {
           className="glass-panel"
           style={{
             width: '100%',
-            maxWidth: '460px',
-            padding: '2rem',
+            maxWidth: '480px',
+            padding: '2.25rem',
             boxShadow: 'var(--shadow-lg)'
           }}
         >
-          <div style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
+          <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
             <div
               style={{
-                width: '44px',
-                height: '44px',
+                width: '46px',
+                height: '46px',
                 borderRadius: '12px',
-                backgroundColor: 'var(--primary)',
+                backgroundColor: selectedRole === 'instructor' ? 'var(--primary)' : '#0284c7',
                 color: '#ffffff',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                margin: '0 auto 1rem',
-                boxShadow: '0 0 15px var(--primary-glow)'
+                margin: '0 auto 0.75rem',
+                boxShadow: '0 0 15px var(--primary-glow)',
+                transition: 'background-color 0.2s ease'
               }}
             >
-              <Network size={24} />
+              {selectedRole === 'instructor' ? <GraduationCap size={24} /> : <Network size={24} />}
             </div>
             <h2 style={{ fontSize: '1.4rem', fontWeight: 800 }}>Create Your Account</h2>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: '4px' }}>
-              Join the real-time virtual network simulator
+              Join NetCollaborate Laboratory & Simulation Platform
             </p>
+          </div>
+
+          {/* Role Selector */}
+          <div style={{ marginBottom: '1.25rem' }}>
+            <label
+              style={{
+                display: 'block',
+                fontSize: '0.78rem',
+                fontWeight: 600,
+                color: 'var(--text-secondary)',
+                marginBottom: '8px',
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em'
+              }}
+            >
+              Account Type / Role:
+            </label>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '8px',
+                padding: '4px',
+                backgroundColor: 'var(--bg-tertiary)',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--border-color)'
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => { setSelectedRole('student'); setError(''); }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  padding: '8px 12px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: selectedRole === 'student' ? '1px solid #0284c7' : 'none',
+                  backgroundColor: selectedRole === 'student' ? '#0284c7' : 'transparent',
+                  color: selectedRole === 'student' ? '#ffffff' : 'var(--text-secondary)',
+                  fontWeight: selectedRole === 'student' ? 700 : 500,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer'
+                }}
+              >
+                <User size={15} />
+                <span>Student</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setSelectedRole('instructor'); setError(''); }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  padding: '8px 12px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: selectedRole === 'instructor' ? '1px solid #8b5cf6' : 'none',
+                  backgroundColor: selectedRole === 'instructor' ? '#8b5cf6' : 'transparent',
+                  color: selectedRole === 'instructor' ? '#ffffff' : 'var(--text-secondary)',
+                  fontWeight: selectedRole === 'instructor' ? 700 : 500,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer'
+                }}
+              >
+                <GraduationCap size={16} />
+                <span>Instructor</span>
+              </button>
+            </div>
           </div>
 
           {error && (
@@ -118,7 +198,7 @@ const Register = () => {
                 marginBottom: '1.25rem'
               }}
             >
-              <AlertCircle size={16} />
+              <AlertCircle size={16} style={{ flexShrink: 0 }} />
               <span>{error}</span>
             </div>
           )}
@@ -132,7 +212,7 @@ const Register = () => {
                   type="text"
                   name="name"
                   className="input-field"
-                  placeholder="Siya Sharma"
+                  placeholder={selectedRole === 'instructor' ? 'Prof. Amit Sharma' : 'Siya Singhaniya'}
                   value={formData.name}
                   onChange={handleChange}
                   style={{ paddingLeft: '32px' }}
@@ -142,31 +222,14 @@ const Register = () => {
             </div>
 
             <div className="input-group" style={{ marginBottom: 0 }}>
-              <label className="input-label">Username</label>
-              <div style={{ position: 'relative' }}>
-                <User size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                <input
-                  type="text"
-                  name="username"
-                  className="input-field"
-                  placeholder="siyasharma"
-                  value={formData.username}
-                  onChange={handleChange}
-                  style={{ paddingLeft: '32px' }}
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="input-group" style={{ marginBottom: 0 }}>
-              <label className="input-label">Email</label>
+              <label className="input-label">Email / College ID</label>
               <div style={{ position: 'relative' }}>
                 <Mail size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                 <input
                   type="email"
                   name="email"
                   className="input-field"
-                  placeholder="siya@college.edu"
+                  placeholder="engineer@college.edu"
                   value={formData.email}
                   onChange={handleChange}
                   style={{ paddingLeft: '32px' }}
@@ -175,68 +238,100 @@ const Register = () => {
               </div>
             </div>
 
-            <div className="input-group" style={{ marginBottom: 0 }}>
-              <label className="input-label">Password</label>
-              <div style={{ position: 'relative' }}>
-                <Lock size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                <input
-                  type="password"
-                  name="password"
-                  className="input-field"
-                  placeholder="Min 6 characters"
-                  value={formData.password}
-                  onChange={handleChange}
-                  style={{ paddingLeft: '32px' }}
-                  required
-                />
+            {selectedRole === 'student' ? (
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Roll Number / Student ID (Optional)</label>
+                <div style={{ position: 'relative' }}>
+                  <ShieldCheck size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                  <input
+                    type="text"
+                    name="rollNumber"
+                    className="input-field"
+                    placeholder="CS2026-081"
+                    value={formData.rollNumber}
+                    onChange={handleChange}
+                    style={{ paddingLeft: '32px' }}
+                  />
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label className="input-label">Instructor Invitation Code</label>
+                  <span style={{ fontSize: '0.7rem', color: '#a78bfa' }}>Default: FACULTY-2026</span>
+                </div>
+                <div style={{ position: 'relative' }}>
+                  <KeyRound size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#a78bfa' }} />
+                  <input
+                    type="text"
+                    name="inviteCode"
+                    className="input-field"
+                    placeholder="FACULTY-2026"
+                    value={formData.inviteCode}
+                    onChange={handleChange}
+                    style={{ paddingLeft: '32px', borderColor: '#8b5cf6' }}
+                    required
+                  />
+                </div>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '3px', display: 'block' }}>
+                  Authorized faculty authorization code required to prevent unauthorized instructor creation.
+                </span>
+              </div>
+            )}
 
-            <div className="input-group" style={{ marginBottom: 0 }}>
-              <label className="input-label">Confirm Password</label>
-              <div style={{ position: 'relative' }}>
-                <Lock size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                <input
-                  type="password"
-                  name="confirmPassword"
-                  className="input-field"
-                  placeholder="Re-enter password"
-                  value={formData.confirmPassword}
-                  onChange={handleChange}
-                  style={{ paddingLeft: '32px' }}
-                  required
-                />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Password</label>
+                <div style={{ position: 'relative' }}>
+                  <Lock size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                  <input
+                    type="password"
+                    name="password"
+                    className="input-field"
+                    placeholder="Min 6 chars"
+                    value={formData.password}
+                    onChange={handleChange}
+                    style={{ paddingLeft: '32px' }}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Confirm Password</label>
+                <div style={{ position: 'relative' }}>
+                  <Lock size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                  <input
+                    type="password"
+                    name="confirmPassword"
+                    className="input-field"
+                    placeholder="Re-enter"
+                    value={formData.confirmPassword}
+                    onChange={handleChange}
+                    style={{ paddingLeft: '32px' }}
+                    required
+                  />
+                </div>
               </div>
             </div>
 
             <button
               type="submit"
               className="btn btn-primary"
-              style={{ width: '100%', padding: '0.65rem', marginTop: '0.5rem' }}
+              style={{
+                width: '100%',
+                padding: '0.7rem',
+                marginTop: '0.5rem',
+                background: selectedRole === 'instructor'
+                  ? 'linear-gradient(135deg, #7c3aed 0%, #8b5cf6 100%)'
+                  : 'linear-gradient(135deg, #0284c7 0%, #06b6d4 100%)'
+              }}
               disabled={loading}
             >
-              <span>{loading ? 'Creating Account...' : 'Create Account'}</span>
+              <span>{loading ? 'Creating Account...' : `Register as ${selectedRole === 'instructor' ? 'Instructor' : 'Student'}`}</span>
               <ArrowRight size={16} />
             </button>
           </form>
-
-          <div style={{ position: 'relative', margin: '1.25rem 0', textAlign: 'center' }}>
-            <div style={{ position: 'absolute', inset: '50% 0 auto 0', borderTop: '1px solid var(--border-color)' }} />
-            <span style={{ position: 'relative', backgroundColor: 'var(--bg-secondary)', padding: '0 0.75rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-              OR
-            </span>
-          </div>
-
-          <button
-            type="button"
-            className="btn btn-secondary"
-            style={{ width: '100%', padding: '0.65rem' }}
-            onClick={handleGuest}
-            disabled={guestLoading}
-          >
-            <UserCheck size={16} color="var(--primary)" />
-            <span>Continue as Guest</span>
-          </button>
 
           <div style={{ textAlign: 'center', marginTop: '1.25rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
             Already have an account?{' '}
