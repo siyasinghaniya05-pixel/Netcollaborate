@@ -11,8 +11,9 @@ import 'reactflow/dist/style.css';
 import DeviceNode from './DeviceNode';
 import NetworkEdge from './NetworkEdge';
 import { useNetwork } from '../context/NetworkContext';
+import { useAuth } from '../context/AuthContext';
 import { getSocket } from '../services/socket';
-import { Navigation } from 'lucide-react';
+import { Navigation, Eye } from 'lucide-react';
 
 const nodeTypes = {
   deviceNode: DeviceNode
@@ -25,6 +26,7 @@ const edgeTypes = {
 const NetworkCanvasInner = () => {
   const reactFlowWrapper = useRef(null);
   const reactFlowInstance = useReactFlow();
+  const { user } = useAuth();
 
   const {
     nodes,
@@ -39,19 +41,28 @@ const NetworkCanvasInner = () => {
     undo,
     redo,
     cursors,
+    activeUsers,
     network,
     theme
   } = useNetwork();
 
+  const currentUserId = user?.id || user?._id || user?.userId;
+  const currentUserName = user?.name || user?.username;
+  const isViewer = activeUsers.find(u => u.userId === currentUserId || u.username === currentUserName)?.role === 'viewer';
+
   // Drag and Drop from Sidebar
   const onDragOver = useCallback((event) => {
     event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-  }, []);
+    event.dataTransfer.dropEffect = isViewer ? 'none' : 'move';
+  }, [isViewer]);
 
   const onDrop = useCallback(
     (event) => {
       event.preventDefault();
+      if (isViewer) {
+        alert('Viewer Mode: Read-only workspace. Request Editor permissions from the room Owner to modify devices.');
+        return;
+      }
       const deviceType = event.dataTransfer.getData('application/netcollaborate-device');
       if (!deviceType) return;
 
@@ -63,7 +74,7 @@ const NetworkCanvasInner = () => {
 
       addDevice(deviceType, position);
     },
-    [reactFlowInstance, addDevice]
+    [reactFlowInstance, addDevice, isViewer]
   );
 
   // Throttled Collaborative Cursor Tracking
@@ -132,8 +143,35 @@ const NetworkCanvasInner = () => {
       onMouseMove={onMouseMove}
       onKeyDown={onKeyDown}
       tabIndex={0}
-      style={{ outline: 'none' }}
+      style={{ outline: 'none', position: 'relative' }}
     >
+      {/* Floating Viewer Mode banner if user has read-only permission */}
+      {isViewer && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '12px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 10,
+            backgroundColor: 'rgba(15, 23, 42, 0.92)',
+            border: '1px solid #475569',
+            borderRadius: '20px',
+            padding: '4px 14px',
+            fontSize: '0.74rem',
+            color: '#94a3b8',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            pointerEvents: 'none',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)'
+          }}
+        >
+          <Eye size={13} color="#94a3b8" />
+          <span>Viewer Mode (Read-Only)</span>
+        </div>
+      )}
+
       <ReactFlow
         nodes={nodes}
         edges={edges}

@@ -10,19 +10,30 @@ import {
   Monitor,
   Shield,
   Layers,
-  Power
+  Power,
+  Terminal,
+  RotateCcw,
+  Sliders,
+  List
 } from 'lucide-react';
 import { useNetwork } from '../context/NetworkContext';
-import { isValidIPv4, isValidSubnetMask, areInSameSubnet } from '../utils/networkMath';
+import { isValidIPv4, isValidSubnetMask, areInSameSubnet, generateMAC } from '../utils/networkMath';
 
 const ConfigurationPanel = () => {
-  const { selectedNode, setSelectedNode, updateDeviceConfig, deleteDevice, nodes } = useNetwork();
+  const { selectedNode, setSelectedNode, updateDeviceConfig, deleteDevice, nodes, edges } = useNetwork();
 
   const [formData, setFormData] = useState({});
-  const [activeTab, setActiveTab] = useState('ip'); // 'ip' | 'interfaces' | 'routing' | 'ports' | 'rules'
+  const [activeTab, setActiveTab] = useState('ip'); // 'ip' | 'interfaces' | 'routing' | 'ports' | 'rules' | 'mac' | 'cli'
 
   // New route input state for routers
   const [newRoute, setNewRoute] = useState({ destination: '', mask: '255.255.255.0', nextHop: '', interface: 'G0/0' });
+
+  // Interactive CLI Terminal State
+  const [cliInput, setCliInput] = useState('');
+  const [cliHistory, setCliHistory] = useState([
+    'NetCollaborate Network Operating System (NOS) v2.4',
+    'Type "help" for a list of supported networking commands.\n'
+  ]);
 
   // Sync selected node data to local form state
   useEffect(() => {
@@ -33,6 +44,11 @@ const ConfigurationPanel = () => {
       else if (['switch', 'hub'].includes(type)) setActiveTab('ports');
       else if (type === 'firewall') setActiveTab('rules');
       else setActiveTab('ip');
+
+      setCliHistory([
+        `NetCollaborate Terminal — ${(selectedNode.data?.name || selectedNode.id)}`,
+        'Type "help" for command syntax.\n'
+      ]);
     }
   }, [selectedNode?.id]);
 
@@ -49,6 +65,59 @@ const ConfigurationPanel = () => {
     const updated = { ...formData, [field]: value };
     setFormData(updated);
     updateDeviceConfig(selectedNode.id, updated);
+  };
+
+  // Reset to Defaults
+  const handleResetDefaults = () => {
+    if (!window.confirm(`Reset ${formData.name || 'this device'} to default factory configuration?`)) return;
+
+    let defaults = {
+      name: formData.name || selectedNode.id,
+      type,
+      status: 'up'
+    };
+
+    if (isEndDevice) {
+      defaults = {
+        ...defaults,
+        ip: type === 'server' ? '192.168.1.100' : '192.168.1.10',
+        subnetMask: '255.255.255.0',
+        gateway: '192.168.1.1',
+        dns: '8.8.8.8',
+        mac: generateMAC(),
+        vlan: '1'
+      };
+    } else if (isRouter) {
+      defaults = {
+        ...defaults,
+        interfaces: [
+          { name: 'G0/0', ip: '192.168.1.1', mask: '255.255.255.0', status: 'up' },
+          { name: 'G0/1', ip: '10.0.0.1', mask: '255.255.255.252', status: 'up' }
+        ],
+        routingTable: []
+      };
+    } else if (isSwitch) {
+      defaults = {
+        ...defaults,
+        ports: [
+          { number: 1, mode: 'access', vlan: '1', status: 'up' },
+          { number: 2, mode: 'access', vlan: '1', status: 'up' },
+          { number: 3, mode: 'access', vlan: '1', status: 'up' },
+          { number: 24, mode: 'trunk', vlan: 'Trunk', status: 'up' }
+        ]
+      };
+    } else if (isFirewall) {
+      defaults = {
+        ...defaults,
+        firewallRules: [
+          { id: 'rule-1', action: 'allow', protocol: 'ICMP', destIp: '' },
+          { id: 'rule-2', action: 'allow', protocol: 'HTTP', destIp: '' }
+        ]
+      };
+    }
+
+    setFormData(defaults);
+    updateDeviceConfig(selectedNode.id, defaults);
   };
 
   // Router Interface update
@@ -87,6 +156,93 @@ const ConfigurationPanel = () => {
     handleFieldChange('ports', ports);
   };
 
+  // CLI Command Execution
+  const handleCliSubmit = (e) => {
+    e.preventDefault();
+    const raw = cliInput.trim();
+    if (!raw) return;
+
+    const parts = raw.split(/\s+/);
+    const cmd = parts[0].toLowerCase();
+    const args = parts.slice(1);
+
+    const promptLabel = `${formData.name || selectedNode.id}#`;
+    let output = '';
+
+    if (cmd === 'help' || cmd === '?') {
+      output = `Supported commands:
+  show ip int brief         - Display interfaces and operational status
+  show ip route             - Display static and connected routing table
+  show mac-address-table    - Display Layer 2 forwarding entries
+  ping <ip>                 - Send ICMP echo request to target IP
+  ip address <ip> <mask>    - Assign IP address and subnet mask
+  ip route <dst> <mask> <nh>- Add static route
+  shutdown / no shutdown    - Disable or enable primary interface
+  clear                     - Clear terminal console`;
+    } else if (cmd === 'clear') {
+      setCliHistory([]);
+      setCliInput('');
+      return;
+    } else if (raw.toLowerCase().includes('show ip int brief') || raw.toLowerCase().includes('show ip interface brief')) {
+      if (isRouter) {
+        const lines = (formData.interfaces || []).map(
+          i => `${i.name.padEnd(8)} ${ (i.ip || 'unassigned').padEnd(16)} YES manual ${(i.status === 'down' ? 'down' : 'up').padEnd(6)} up`
+        );
+        output = `Interface   IP-Address      OK? Method Status Protocol\n` + lines.join('\n');
+      } else {
+        output = `Interface   IP-Address      Status\neth0        ${formData.ip || 'unassigned'}     ${formData.status === 'down' ? 'down' : 'up'}`;
+      }
+    } else if (raw.toLowerCase().includes('show ip route')) {
+      if (isRouter) {
+        const connRoutes = (formData.interfaces || [])
+          .filter(i => i.ip && i.status !== 'down')
+          .map(i => `C    ${i.ip}/${i.mask} is directly connected, ${i.name}`);
+        const staticRoutes = (formData.routingTable || []).map(
+          r => `S    ${r.destination}/${r.mask} [1/0] via ${r.nextHop || 'direct'}`
+        );
+        output = `Codes: C - connected, S - static\n\n` + [...connRoutes, ...staticRoutes].join('\n');
+      } else {
+        output = `IPv4 Routing Table:\nDestination       Gateway       Netmask\n0.0.0.0           ${formData.gateway || 'None'}       0.0.0.0`;
+      }
+    } else if (raw.toLowerCase().includes('show mac-address-table') || raw.toLowerCase().includes('show mac')) {
+      const neighborEdges = edges.filter(e => e.source === selectedNode.id || e.target === selectedNode.id);
+      const rows = neighborEdges.map((e, idx) => {
+        const otherId = e.source === selectedNode.id ? e.target : e.source;
+        const otherNode = nodes.find(n => n.id === otherId);
+        return `   1    ${otherNode?.data?.mac || '00:1A:2B:3C:4D:' + (10 + idx)}    DYNAMIC     Fa0/${idx + 1}`;
+      });
+      output = `          Mac Address Table\n-------------------------------------------\nVlan    Mac Address       Type        Ports\n----    -----------       --------    -----\n` + (rows.length > 0 ? rows.join('\n') : 'No dynamic MAC entries learned.');
+    } else if (cmd === 'ping') {
+      const targetIP = args[0];
+      if (!targetIP) {
+        output = '% Usage: ping <target-ip>';
+      } else {
+        output = `Type escape sequence to abort.\nSending 5, 100-byte ICMP Echos to ${targetIP}, timeout is 2 seconds:\n!!!!!\nSuccess rate is 100 percent (5/5), round-trip min/avg/max = 1/4/9 ms`;
+      }
+    } else if (cmd === 'ip' && args[0] === 'address') {
+      const ip = args[1];
+      const mask = args[2] || '255.255.255.0';
+      if (isValidIPv4(ip) && isValidSubnetMask(mask)) {
+        handleFieldChange('ip', ip);
+        handleFieldChange('subnetMask', mask);
+        output = `Configured primary IP to ${ip} ${mask}`;
+      } else {
+        output = '% Invalid IPv4 address or subnet mask format.';
+      }
+    } else if (cmd === 'shutdown') {
+      handleFieldChange('status', 'down');
+      output = `% Interface administratively shut down.`;
+    } else if (cmd === 'no' && args[0] === 'shutdown') {
+      handleFieldChange('status', 'up');
+      output = `% Interface administratively up.`;
+    } else {
+      output = `% Unrecognized command "${raw}". Type "help" for syntax.`;
+    }
+
+    setCliHistory(prev => [...prev, `${promptLabel} ${raw}`, output, '']);
+    setCliInput('');
+  };
+
   // Real-time validation checks for End Devices
   const isIpValid = isValidIPv4(formData.ip);
   const isMaskValid = isValidSubnetMask(formData.subnetMask);
@@ -96,7 +252,7 @@ const ConfigurationPanel = () => {
   return (
     <div
       style={{
-        width: '320px',
+        width: '340px',
         backgroundColor: 'var(--bg-secondary)',
         borderLeft: '1px solid var(--border-color)',
         display: 'flex',
@@ -112,14 +268,15 @@ const ConfigurationPanel = () => {
           borderBottom: '1px solid var(--border-color)',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between'
+          justifyContent: 'space-between',
+          backgroundColor: 'var(--bg-tertiary)'
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <div
             style={{
-              width: '28px',
-              height: '28px',
+              width: '30px',
+              height: '30px',
               borderRadius: 'var(--radius-sm)',
               backgroundColor: 'var(--primary-light)',
               color: 'var(--primary)',
@@ -135,33 +292,42 @@ const ConfigurationPanel = () => {
               {formData.name || selectedNode.id}
             </div>
             <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'capitalize' }}>
-              {type} Configuration
+              {type} • Configuration
             </div>
           </div>
         </div>
 
-        <button
-          className="btn btn-ghost btn-icon btn-sm"
-          onClick={() => setSelectedNode(null)}
-          title="Close Configuration Panel"
-        >
-          <X size={16} />
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <button
+            className="btn btn-ghost btn-icon btn-sm"
+            onClick={handleResetDefaults}
+            title="Reset to Factory Defaults"
+          >
+            <RotateCcw size={14} />
+          </button>
+          <button
+            className="btn btn-ghost btn-icon btn-sm"
+            onClick={() => setSelectedNode(null)}
+            title="Close Panel"
+          >
+            <X size={16} />
+          </button>
+        </div>
       </div>
 
       {/* Device Power / Status Bar */}
       <div
         style={{
-          padding: '0.6rem 1rem',
-          backgroundColor: 'var(--bg-tertiary)',
+          padding: '0.5rem 1rem',
+          backgroundColor: 'var(--bg-secondary)',
           borderBottom: '1px solid var(--border-color)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between'
         }}
       >
-        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-          Interface Status
+        <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+          Operational State
         </span>
         <button
           onClick={() => handleFieldChange('status', formData.status === 'down' ? 'up' : 'down')}
@@ -172,7 +338,7 @@ const ConfigurationPanel = () => {
             padding: '2px 8px',
             borderRadius: 'var(--radius-full)',
             border: 'none',
-            fontSize: '0.7rem',
+            fontSize: '0.68rem',
             fontWeight: 700,
             cursor: 'pointer',
             backgroundColor: formData.status === 'down' ? 'var(--danger-light)' : 'var(--success-light)',
@@ -180,72 +346,169 @@ const ConfigurationPanel = () => {
           }}
         >
           <Power size={11} />
-          {formData.status === 'down' ? 'OFFLINE' : 'ONLINE'}
+          {formData.status === 'down' ? 'ADMIN DOWN' : 'UP (ONLINE)'}
         </button>
       </div>
 
-      {/* Tabs for Routers */}
-      {isRouter && (
-        <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', padding: '0 0.5rem' }}>
+      {/* Tabs Selector */}
+      <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', padding: '0 0.5rem', backgroundColor: 'var(--bg-tertiary)' }}>
+        {isEndDevice && (
           <button
-            onClick={() => setActiveTab('interfaces')}
+            onClick={() => setActiveTab('ip')}
             style={{
               flex: 1,
               padding: '0.5rem 0',
-              fontSize: '0.75rem',
+              fontSize: '0.72rem',
               fontWeight: 600,
               background: 'none',
               border: 'none',
-              borderBottom: activeTab === 'interfaces' ? '2px solid var(--primary)' : '2px solid transparent',
-              color: activeTab === 'interfaces' ? 'var(--primary)' : 'var(--text-secondary)',
+              borderBottom: activeTab === 'ip' ? '2px solid var(--primary)' : '2px solid transparent',
+              color: activeTab === 'ip' ? 'var(--primary)' : 'var(--text-secondary)',
               cursor: 'pointer'
             }}
           >
-            Interfaces
+            IP Config
           </button>
+        )}
+
+        {isRouter && (
+          <>
+            <button
+              onClick={() => setActiveTab('interfaces')}
+              style={{
+                flex: 1,
+                padding: '0.5rem 0',
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                background: 'none',
+                border: 'none',
+                borderBottom: activeTab === 'interfaces' ? '2px solid var(--primary)' : '2px solid transparent',
+                color: activeTab === 'interfaces' ? 'var(--primary)' : 'var(--text-secondary)',
+                cursor: 'pointer'
+              }}
+            >
+              Interfaces
+            </button>
+            <button
+              onClick={() => setActiveTab('routing')}
+              style={{
+                flex: 1,
+                padding: '0.5rem 0',
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                background: 'none',
+                border: 'none',
+                borderBottom: activeTab === 'routing' ? '2px solid var(--primary)' : '2px solid transparent',
+                color: activeTab === 'routing' ? 'var(--primary)' : 'var(--text-secondary)',
+                cursor: 'pointer'
+              }}
+            >
+              Static Routes
+            </button>
+          </>
+        )}
+
+        {isSwitch && (
+          <>
+            <button
+              onClick={() => setActiveTab('ports')}
+              style={{
+                flex: 1,
+                padding: '0.5rem 0',
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                background: 'none',
+                border: 'none',
+                borderBottom: activeTab === 'ports' ? '2px solid var(--primary)' : '2px solid transparent',
+                color: activeTab === 'ports' ? 'var(--primary)' : 'var(--text-secondary)',
+                cursor: 'pointer'
+              }}
+            >
+              Ports & VLANs
+            </button>
+            <button
+              onClick={() => setActiveTab('mac')}
+              style={{
+                flex: 1,
+                padding: '0.5rem 0',
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                background: 'none',
+                border: 'none',
+                borderBottom: activeTab === 'mac' ? '2px solid var(--primary)' : '2px solid transparent',
+                color: activeTab === 'mac' ? 'var(--primary)' : 'var(--text-secondary)',
+                cursor: 'pointer'
+              }}
+            >
+              MAC Table
+            </button>
+          </>
+        )}
+
+        {isFirewall && (
           <button
-            onClick={() => setActiveTab('routing')}
+            onClick={() => setActiveTab('rules')}
             style={{
               flex: 1,
               padding: '0.5rem 0',
-              fontSize: '0.75rem',
+              fontSize: '0.72rem',
               fontWeight: 600,
               background: 'none',
               border: 'none',
-              borderBottom: activeTab === 'routing' ? '2px solid var(--primary)' : '2px solid transparent',
-              color: activeTab === 'routing' ? 'var(--primary)' : 'var(--text-secondary)',
+              borderBottom: activeTab === 'rules' ? '2px solid var(--primary)' : '2px solid transparent',
+              color: activeTab === 'rules' ? 'var(--primary)' : 'var(--text-secondary)',
               cursor: 'pointer'
             }}
           >
-            Routing Table
+            Access Rules
           </button>
-        </div>
-      )}
+        )}
+
+        {/* Universal CLI Terminal Tab */}
+        <button
+          onClick={() => setActiveTab('cli')}
+          style={{
+            flex: 1,
+            padding: '0.5rem 0',
+            fontSize: '0.72rem',
+            fontWeight: 600,
+            background: 'none',
+            border: 'none',
+            borderBottom: activeTab === 'cli' ? '2px solid var(--primary)' : '2px solid transparent',
+            color: activeTab === 'cli' ? 'var(--primary)' : 'var(--text-secondary)',
+            cursor: 'pointer'
+          }}
+        >
+          CLI Terminal
+        </button>
+      </div>
 
       {/* Body Content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
         {/* Device Name Field (Common) */}
-        <div className="input-group">
-          <label className="input-label">Device Name</label>
-          <input
-            type="text"
-            className="input-field"
-            value={formData.name || ''}
-            onChange={(e) => handleFieldChange('name', e.target.value)}
-          />
-        </div>
+        {activeTab !== 'cli' && (
+          <div className="input-group">
+            <label className="input-label">Device Name</label>
+            <input
+              type="text"
+              className="input-field"
+              value={formData.name || ''}
+              onChange={(e) => handleFieldChange('name', e.target.value)}
+            />
+          </div>
+        )}
 
-        {/* 1. End Device Configuration (PC, Laptop, Server, Printer) */}
-        {isEndDevice && (
+        {/* 1. End Device Configuration */}
+        {isEndDevice && activeTab === 'ip' && (
           <>
             <div className="input-group">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <label className="input-label">IPv4 Address</label>
                 {formData.ip && (
                   isIpValid ? (
-                    <span style={{ fontSize: '0.68rem', color: 'var(--success)' }}>✓ Valid</span>
+                    <span style={{ fontSize: '0.68rem', color: 'var(--success)' }}>✓ Valid IPv4</span>
                   ) : (
-                    <span style={{ fontSize: '0.68rem', color: 'var(--danger)' }}>✕ Invalid</span>
+                    <span style={{ fontSize: '0.68rem', color: 'var(--danger)' }}>✕ Invalid format</span>
                   )
                 )}
               </div>
@@ -264,9 +527,9 @@ const ConfigurationPanel = () => {
                 <label className="input-label">Subnet Mask</label>
                 {formData.subnetMask && (
                   isMaskValid ? (
-                    <span style={{ fontSize: '0.68rem', color: 'var(--success)' }}>✓ Valid</span>
+                    <span style={{ fontSize: '0.68rem', color: 'var(--success)' }}>✓ Valid Subnet</span>
                   ) : (
-                    <span style={{ fontSize: '0.68rem', color: 'var(--danger)' }}>✕ Invalid</span>
+                    <span style={{ fontSize: '0.68rem', color: 'var(--danger)' }}>✕ Invalid Mask</span>
                   )
                 )}
               </div>
@@ -287,7 +550,7 @@ const ConfigurationPanel = () => {
                   !isGatewaySameSubnet ? (
                     <span style={{ fontSize: '0.68rem', color: 'var(--danger)' }}>✕ Subnet mismatch</span>
                   ) : (
-                    <span style={{ fontSize: '0.68rem', color: 'var(--success)' }}>✓ OK</span>
+                    <span style={{ fontSize: '0.68rem', color: 'var(--success)' }}>✓ Subnet aligned</span>
                   )
                 )}
               </div>
@@ -301,7 +564,7 @@ const ConfigurationPanel = () => {
               />
               {formData.gateway && !isGatewaySameSubnet && (
                 <span style={{ fontSize: '0.68rem', color: 'var(--danger)', marginTop: '2px' }}>
-                  Gateway must be on the same subnet as the host IP!
+                  Gateway must reside on the same local subnet!
                 </span>
               )}
             </div>
@@ -325,17 +588,6 @@ const ConfigurationPanel = () => {
                 value={formData.mac || ''}
                 onChange={(e) => handleFieldChange('mac', e.target.value)}
                 style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}
-              />
-            </div>
-
-            <div className="input-group">
-              <label className="input-label">VLAN Tag</label>
-              <input
-                type="text"
-                className="input-field"
-                placeholder="1"
-                value={formData.vlan || ''}
-                onChange={(e) => handleFieldChange('vlan', e.target.value)}
               />
             </div>
           </>
@@ -419,13 +671,12 @@ const ConfigurationPanel = () => {
         {isRouter && activeTab === 'routing' && (
           <div>
             <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
-              Static Routes
+              Static Routing Table
             </div>
 
-            {/* Existing Routes */}
             {(formData.routingTable || []).length === 0 ? (
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic', marginBottom: '1rem' }}>
-                No static routes configured. Only directly connected networks reachable.
+                No static routes configured. Only directly connected interfaces will resolve.
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '1rem' }}>
@@ -446,7 +697,7 @@ const ConfigurationPanel = () => {
                     <div>
                       <div style={{ fontWeight: 600 }}>{route.destination}/{route.mask}</div>
                       <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem' }}>
-                        via {route.nextHop} ({route.interface})
+                        via {route.nextHop} ({route.interface || 'G0/1'})
                       </div>
                     </div>
                     <button
@@ -476,7 +727,7 @@ const ConfigurationPanel = () => {
               </div>
 
               <div className="input-group" style={{ marginBottom: '0.4rem' }}>
-                <label style={{ fontSize: '0.65rem' }}>Destination Network</label>
+                <label style={{ fontSize: '0.65rem' }}>Destination Subnet</label>
                 <input
                   type="text"
                   className="input-field"
@@ -500,7 +751,7 @@ const ConfigurationPanel = () => {
               </div>
 
               <div className="input-group" style={{ marginBottom: '0.4rem' }}>
-                <label style={{ fontSize: '0.65rem' }}>Next Hop IP</label>
+                <label style={{ fontSize: '0.65rem' }}>Next Hop Router IP</label>
                 <input
                   type="text"
                   className="input-field"
@@ -522,11 +773,11 @@ const ConfigurationPanel = () => {
           </div>
         )}
 
-        {/* 4. Switch Ports */}
-        {isSwitch && (
+        {/* 4. Switch Ports & VLANs */}
+        {isSwitch && activeTab === 'ports' && (
           <div>
             <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
-              Switch Ports & VLANs
+              Switch Ports & VLAN Assignments
             </div>
 
             {(formData.ports || []).map((port, idx) => (
@@ -544,11 +795,26 @@ const ConfigurationPanel = () => {
                 }}
               >
                 <span style={{ fontWeight: 700, minWidth: '45px' }}>Port {port.number}</span>
+                <select
+                  value={port.mode || 'access'}
+                  onChange={(e) => handlePortChange(idx, 'mode', e.target.value)}
+                  style={{
+                    backgroundColor: 'var(--bg-secondary)',
+                    border: '1px solid var(--border-color)',
+                    color: 'var(--text-primary)',
+                    borderRadius: '4px',
+                    fontSize: '0.7rem',
+                    height: '24px'
+                  }}
+                >
+                  <option value="access">Access</option>
+                  <option value="trunk">Trunk</option>
+                </select>
                 <input
                   type="text"
                   className="input-field"
-                  style={{ height: '24px', fontSize: '0.7rem', padding: '0 6px' }}
-                  placeholder="VLAN (e.g. 10 or Trunk)"
+                  style={{ height: '24px', fontSize: '0.7rem', padding: '0 6px', flex: 1 }}
+                  placeholder="VLAN ID"
                   value={port.vlan || ''}
                   onChange={(e) => handlePortChange(idx, 'vlan', e.target.value)}
                 />
@@ -570,11 +836,38 @@ const ConfigurationPanel = () => {
           </div>
         )}
 
-        {/* 5. Firewall Security Rules */}
-        {isFirewall && (
+        {/* 5. Switch MAC Address Table */}
+        {isSwitch && activeTab === 'mac' && (
           <div>
             <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
-              Firewall Access Rules
+              Dynamic MAC Address Table
+            </div>
+            <div style={{ backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', padding: '0.5rem', fontSize: '0.72rem', fontFamily: 'var(--font-mono)' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 1fr', fontWeight: 700, borderBottom: '1px solid var(--border-color)', paddingBottom: '4px', marginBottom: '4px' }}>
+                <span>VLAN</span>
+                <span>MAC Address</span>
+                <span>Port</span>
+              </div>
+              {edges.filter(e => e.source === selectedNode.id || e.target === selectedNode.id).map((e, idx) => {
+                const neighborId = e.source === selectedNode.id ? e.target : e.source;
+                const neighborNode = nodes.find(n => n.id === neighborId);
+                return (
+                  <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 1fr', padding: '2px 0' }}>
+                    <span>VLAN 1</span>
+                    <span>{neighborNode?.data?.mac || '00:1A:2B:3C:4D:' + (10 + idx)}</span>
+                    <span>Fa0/{idx + 1}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* 6. Firewall Access Rules */}
+        {isFirewall && activeTab === 'rules' && (
+          <div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+              Firewall Security Policy
             </div>
 
             {(formData.firewallRules || []).map((rule, idx) => (
@@ -604,7 +897,7 @@ const ConfigurationPanel = () => {
                   </button>
                 </div>
                 <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem', marginTop: '2px' }}>
-                  Target: {rule.destIp || 'Any Destination'}
+                  Destination: {rule.destIp || 'Any IP Address'}
                 </div>
               </div>
             ))}
@@ -624,10 +917,54 @@ const ConfigurationPanel = () => {
             </button>
           </div>
         )}
+
+        {/* 7. Interactive Cisco-style CLI Terminal */}
+        {activeTab === 'cli' && (
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <div
+              style={{
+                flex: 1,
+                minHeight: '260px',
+                backgroundColor: '#0a0f1d',
+                borderRadius: '8px',
+                padding: '0.75rem',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.72rem',
+                color: '#38bdf8',
+                overflowY: 'auto',
+                whiteSpace: 'pre-wrap',
+                border: '1px solid #1e293b',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '2px'
+              }}
+            >
+              {cliHistory.map((item, idx) => (
+                <div key={idx} style={{ color: item.includes('%') ? '#f87171' : item.includes('#') ? '#a78bfa' : '#94a3b8' }}>
+                  {item}
+                </div>
+              ))}
+            </div>
+
+            <form onSubmit={handleCliSubmit} style={{ marginTop: '0.5rem', display: 'flex', gap: '4px' }}>
+              <input
+                type="text"
+                className="input-field"
+                placeholder="Enter command (e.g. show ip route, ping 192.168.1.1)..."
+                value={cliInput}
+                onChange={(e) => setCliInput(e.target.value)}
+                style={{ height: '30px', fontSize: '0.72rem', fontFamily: 'var(--font-mono)' }}
+              />
+              <button type="submit" className="btn btn-primary btn-sm" style={{ padding: '0 8px' }}>
+                <Terminal size={13} />
+              </button>
+            </form>
+          </div>
+        )}
       </div>
 
       {/* Delete Device Action */}
-      <div style={{ padding: '0.75rem 1rem', borderTop: '1px solid var(--border-color)' }}>
+      <div style={{ padding: '0.75rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-tertiary)' }}>
         <button
           className="btn btn-danger btn-sm"
           style={{ width: '100%' }}

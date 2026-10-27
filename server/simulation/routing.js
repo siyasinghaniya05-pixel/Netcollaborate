@@ -103,6 +103,7 @@ function findL2Path(graph, startNodeId, targetNodeId) {
 
     const neighbors = graph.getNeighbors(currentNodeId);
     for (const neighbor of neighbors) {
+      if (neighbor.status === 'disconnected' || neighbor.status === 'down') continue;
       const neighborNode = graph.getNode(neighbor.neighborId);
       if (!neighborNode) continue;
 

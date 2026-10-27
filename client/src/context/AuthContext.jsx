@@ -15,13 +15,15 @@ export const AuthProvider = ({ children }) => {
     let authSubscription = null;
 
     const initAuth = async () => {
+      let resolved = false;
+
+      // 1. Try Supabase session if configured
       if (isSupabaseConfigured()) {
         try {
           const { data: { session } } = await supabase.auth.getSession();
           if (session?.user) {
             await handleSupabaseSession(session);
-          } else {
-            clearSession();
+            resolved = true;
           }
 
           // Listen for active Supabase auth changes
@@ -29,16 +31,28 @@ export const AuthProvider = ({ children }) => {
             if (session?.user) {
               await handleSupabaseSession(session);
             } else if (event === 'SIGNED_OUT') {
-              clearSession();
+              // Only clear if active session was Supabase
+              const storedUser = localStorage.getItem('user');
+              if (storedUser) {
+                try {
+                  const u = JSON.parse(storedUser);
+                  if (u.isSupabase) {
+                    clearSession();
+                  }
+                } catch {
+                  clearSession();
+                }
+              }
             }
           });
-          authSubscription = listener.subscription;
+          authSubscription = listener?.subscription;
         } catch (err) {
           console.warn('[Supabase Auth] Init failed:', err.message);
-          clearSession();
         }
-      } else {
-        // Fallback to token verification via Express API
+      }
+
+      // 2. Fallback to token verification via Express API
+      if (!resolved) {
         const storedToken = localStorage.getItem('token');
         const storedUser = localStorage.getItem('user');
 
@@ -48,17 +62,27 @@ export const AuthProvider = ({ children }) => {
             setUser(parsed);
             setToken(storedToken);
 
-            const res = await authAPI.getMe();
-            if (res.data?.user) {
-              setUser(res.data.user);
-              localStorage.setItem('user', JSON.stringify(res.data.user));
+            try {
+              const res = await authAPI.getMe();
+              if (res.data?.user) {
+                setUser(res.data.user);
+                localStorage.setItem('user', JSON.stringify(res.data.user));
+              }
+            } catch (err) {
+              if (err.response?.status === 401) {
+                console.warn('[Auth] Token expired:', err.message);
+                clearSession();
+              }
             }
           } catch (err) {
-            console.warn('[Auth] Session expired or invalid:', err.message);
+            console.warn('[Auth] Session parsing failed:', err.message);
             clearSession();
           }
+        } else {
+          clearSession();
         }
       }
+
       setLoading(false);
     };
 
@@ -91,7 +115,9 @@ export const AuthProvider = ({ children }) => {
         name: effectiveName,
         username: effectiveName.toLowerCase().replace(/\s+/g, '_'),
         role: effectiveRole,
-        rollNumber: effectiveRoll
+        rollNumber: effectiveRoll,
+        isGuest: false,
+        isSupabase: true
       };
 
       setUser(userObject);
@@ -113,68 +139,84 @@ export const AuthProvider = ({ children }) => {
 
   /**
    * Login using Supabase Auth (or API fallback)
-   * Enforces role verification from database
+   * Enforces role verification and seamlessly falls back to Express API / seeded accounts
    */
   const login = async (email, password, selectedRole = 'student') => {
+    const cleanEmail = email.trim();
+
+    // 1. If Supabase is configured, attempt Supabase auth first
     if (isSupabaseConfigured()) {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password
-      });
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password
+        });
 
-      if (error) {
-        throw new Error(error.message || 'Invalid email or password');
+        if (!error && data?.user && data?.session) {
+          // Authoritative role retrieval from database
+          const profile = await profileService.getProfile(data.user.id);
+          const dbRole = profile?.role || data.user.user_metadata?.role || 'student';
+
+          // Strict role verification: Reject if user selected Instructor but db role is student
+          if (selectedRole === 'instructor' && dbRole !== 'instructor') {
+            await supabase.auth.signOut();
+            clearSession();
+            throw new Error('Access Denied: Your account does not have Instructor authorization.');
+          }
+
+          const userPayload = {
+            id: data.user.id,
+            userId: data.user.id,
+            email: data.user.email,
+            name: profile?.full_name || data.user.user_metadata?.full_name || data.user.email.split('@')[0],
+            username: (profile?.full_name || data.user.email.split('@')[0]).toLowerCase().replace(/\s+/g, '_'),
+            role: dbRole,
+            rollNumber: profile?.roll_number || data.user.user_metadata?.roll_number || '',
+            isSupabase: true
+          };
+
+          setUser(userPayload);
+          setToken(data.session.access_token);
+          localStorage.setItem('token', data.session.access_token);
+          localStorage.setItem('user', JSON.stringify(userPayload));
+
+          return { success: true, user: userPayload, token: data.session.access_token };
+        }
+        if (error) {
+          console.warn('[Supabase Auth] Sign-in not fulfilled, falling back to Express API:', error.message);
+        }
+      } catch (supErr) {
+        if (supErr.message?.includes('Access Denied')) {
+          throw supErr;
+        }
+        console.warn('[Supabase Auth] Sign-in not fulfilled, falling back to Express API:', supErr.message);
       }
-
-      if (!data.user) {
-        throw new Error('Authentication succeeded but user record could not be found.');
-      }
-
-      // Authoritative role retrieval from database
-      const profile = await profileService.getProfile(data.user.id);
-      const dbRole = profile?.role || data.user.user_metadata?.role || 'student';
-
-      // Strict role verification: Reject if user selected Instructor but db role is student
-      if (selectedRole === 'instructor' && dbRole !== 'instructor') {
-        await supabase.auth.signOut();
-        clearSession();
-        throw new Error('Access Denied: Your account does not have Instructor authorization.');
-      }
-
-      const userPayload = {
-        id: data.user.id,
-        userId: data.user.id,
-        email: data.user.email,
-        name: profile?.full_name || data.user.user_metadata?.full_name || data.user.email.split('@')[0],
-        username: (profile?.full_name || data.user.email.split('@')[0]).toLowerCase().replace(/\s+/g, '_'),
-        role: dbRole,
-        rollNumber: profile?.roll_number || data.user.user_metadata?.roll_number || ''
-      };
-
-      setUser(userPayload);
-      setToken(data.session.access_token);
-      localStorage.setItem('token', data.session.access_token);
-      localStorage.setItem('user', JSON.stringify(userPayload));
-
-      return { success: true, user: userPayload, token: data.session.access_token };
     }
 
-    // Fallback: Express API
-    const res = await authAPI.login({ email, password, role: selectedRole });
-    if (res.data?.success) {
-      const userObj = res.data.user;
+    // 2. Fallback: Express Backend API (handles seeded accounts & local database)
+    try {
+      const res = await authAPI.login({ email: cleanEmail, password, role: selectedRole });
+      if (res.data?.success) {
+        const userObj = res.data.user;
 
-      if (selectedRole === 'instructor' && userObj.role !== 'instructor') {
-        clearSession();
-        throw new Error('Access Denied: Your account does not have Instructor authorization.');
+        if (selectedRole === 'instructor' && userObj.role !== 'instructor') {
+          clearSession();
+          throw new Error('Access Denied: Your account does not have Instructor authorization.');
+        }
+
+        setUser(userObj);
+        setToken(res.data.token);
+        localStorage.setItem('token', res.data.token);
+        localStorage.setItem('user', JSON.stringify(userObj));
       }
-
-      setUser(userObj);
-      setToken(res.data.token);
-      localStorage.setItem('token', res.data.token);
-      localStorage.setItem('user', JSON.stringify(userObj));
+      return res.data;
+    } catch (apiErr) {
+      if (apiErr.code === 'ERR_NETWORK' || !apiErr.response) {
+        throw new Error('Cannot connect to backend server. Ensure backend is running on http://localhost:5000');
+      }
+      const errMsg = apiErr.response?.data?.message || apiErr.response?.data?.error || apiErr.message || 'Invalid credentials or role mismatch. Please verify.';
+      throw new Error(errMsg);
     }
-    return res.data;
   };
 
   /**
@@ -202,72 +244,75 @@ export const AuthProvider = ({ children }) => {
     }
 
     if (isSupabaseConfigured()) {
-      const { data, error } = await supabase.auth.signUp({
-        email: email.trim(),
-        password,
-        options: {
-          data: {
-            full_name: name.trim(),
-            role: assignedRole,
-            roll_number: assignedRole === 'student' ? (rollNumber || '').trim() : ''
-          }
-        }
-      });
-
-      if (error) {
-        throw new Error(error.message || 'Registration failed');
-      }
-
-      // Upsert profile in public.profiles table
-      if (data.user) {
-        try {
-          await supabase.from('profiles').upsert([
-            {
-              id: data.user.id,
+      try {
+        const { data, error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: {
+            data: {
               full_name: name.trim(),
-              email: email.trim(),
               role: assignedRole,
               roll_number: assignedRole === 'student' ? (rollNumber || '').trim() : ''
             }
-          ]);
-        } catch (profErr) {
-          console.warn('[Supabase Profile] Creation note:', profErr.message);
+          }
+        });
+
+        if (!error && data?.user) {
+          // Upsert profile in public.profiles table
+          try {
+            await supabase.from('profiles').upsert([
+              {
+                id: data.user.id,
+                full_name: name.trim(),
+                email: email.trim(),
+                role: assignedRole,
+                roll_number: assignedRole === 'student' ? (rollNumber || '').trim() : ''
+              }
+            ]);
+          } catch (profErr) {
+            console.warn('[Supabase Profile] Creation note:', profErr.message);
+          }
+
+          if (data.session) {
+            const userPayload = {
+              id: data.user.id,
+              userId: data.user.id,
+              email: data.user.email,
+              name: name.trim(),
+              username: name.trim().toLowerCase().replace(/\s+/g, '_'),
+              role: assignedRole,
+              rollNumber: rollNumber || '',
+              isSupabase: true
+            };
+            setUser(userPayload);
+            setToken(data.session.access_token);
+            localStorage.setItem('token', data.session.access_token);
+            localStorage.setItem('user', JSON.stringify(userPayload));
+            return { success: true, user: userPayload, token: data.session.access_token };
+          }
         }
+      } catch (supErr) {
+        console.warn('[Supabase Register] Supabase signup bypassed, falling back to Express API:', supErr.message);
       }
-
-      if (data.session) {
-        const userPayload = {
-          id: data.user.id,
-          userId: data.user.id,
-          email: data.user.email,
-          name: name.trim(),
-          username: name.trim().toLowerCase().replace(/\s+/g, '_'),
-          role: assignedRole,
-          rollNumber: rollNumber || ''
-        };
-        setUser(userPayload);
-        setToken(data.session.access_token);
-        localStorage.setItem('token', data.session.access_token);
-        localStorage.setItem('user', JSON.stringify(userPayload));
-        return { success: true, user: userPayload, token: data.session.access_token };
-      }
-
-      return {
-        success: true,
-        user: { email, role: assignedRole },
-        message: 'Account created successfully! Please check your email to confirm registration or sign in.'
-      };
     }
 
-    // Fallback: Express API
-    const res = await authAPI.register(formData);
-    if (res.data?.success) {
-      setUser(res.data.user);
-      setToken(res.data.token);
-      localStorage.setItem('token', res.data.token);
-      localStorage.setItem('user', JSON.stringify(res.data.user));
+    // Fallback: Express API (creates user in backend database/memory and immediately logs them in)
+    try {
+      const res = await authAPI.register(formData);
+      if (res.data?.success) {
+        setUser(res.data.user);
+        setToken(res.data.token);
+        localStorage.setItem('token', res.data.token);
+        localStorage.setItem('user', JSON.stringify(res.data.user));
+      }
+      return res.data;
+    } catch (apiErr) {
+      if (apiErr.code === 'ERR_NETWORK' || !apiErr.response) {
+        throw new Error('Cannot connect to backend server. Ensure backend is running on http://localhost:5000');
+      }
+      const errMsg = apiErr.response?.data?.message || apiErr.message || 'Registration failed. Please try again.';
+      throw new Error(errMsg);
     }
-    return res.data;
   };
 
   /**

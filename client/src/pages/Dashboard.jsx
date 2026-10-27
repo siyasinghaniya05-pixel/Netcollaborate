@@ -7,6 +7,9 @@ import {
   Clock,
   Activity,
   Trash2,
+  Copy,
+  Edit2,
+  BookOpen,
   ExternalLink,
   Search,
   Share2,
@@ -21,6 +24,7 @@ import CreateNetworkModal from '../components/CreateNetworkModal';
 import { networkAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useNetwork } from '../context/NetworkContext';
+import { LAB_TEMPLATES } from '../utils/labTemplates';
 
 const Dashboard = () => {
   const { user } = useAuth();
@@ -29,7 +33,8 @@ const Dashboard = () => {
 
   const [networks, setNetworks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('all'); // 'all' | 'mine' | 'shared'
+  const [activeTab, setActiveTab] = useState('all'); // 'all' | 'mine' | 'shared' | 'templates'
+  const [sortBy, setSortBy] = useState('recent'); // 'recent' | 'health' | 'devices' | 'name'
   const [searchTerm, setSearchTerm] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
@@ -76,6 +81,56 @@ const Dashboard = () => {
     }
   };
 
+  const handleDuplicateNetwork = async (e, net) => {
+    e.stopPropagation();
+    try {
+      const clonedNet = {
+        name: `${net.name} (Copy)`,
+        description: `Copy of ${net.name}. ${net.description || ''}`,
+        nodes: net.nodes || [],
+        edges: net.edges || [],
+        visibility: 'private',
+        roomId: 'NET-' + Math.random().toString(36).substring(2, 8).toUpperCase()
+      };
+      const res = await networkAPI.createNetwork(clonedNet);
+      if (res.data?.success) {
+        setNetworks(prev => [res.data.data, ...prev]);
+      }
+    } catch (err) {
+      alert('Failed to duplicate network project.');
+    }
+  };
+
+  const handleRenameNetwork = async (e, net) => {
+    e.stopPropagation();
+    const newName = window.prompt('Enter new project name:', net.name);
+    if (!newName || newName.trim() === '' || newName === net.name) return;
+
+    try {
+      const res = await networkAPI.updateNetwork(net.id || net._id, { name: newName.trim() });
+      if (res.data?.success) {
+        setNetworks(prev => prev.map(n => ((n.id === net.id || n._id === net._id) ? { ...n, name: newName.trim() } : n)));
+      }
+    } catch (err) {
+      alert('Failed to rename project.');
+    }
+  };
+
+  const handleLaunchTemplate = (tmpl) => {
+    const newNet = {
+      id: 'net-' + Date.now(),
+      name: tmpl.name,
+      description: tmpl.description,
+      roomId: 'NET-' + Math.random().toString(36).substring(2, 8).toUpperCase(),
+      nodes: tmpl.nodes,
+      edges: tmpl.edges,
+      healthScore: 100,
+      createdAt: new Date().toISOString()
+    };
+    loadNetwork(newNet);
+    navigate(`/workspace/${newNet.roomId}`);
+  };
+
   const handleJoinByCode = async (e) => {
     e.preventDefault();
     if (!joinRoomCode.trim()) return;
@@ -101,6 +156,17 @@ const Dashboard = () => {
     if (activeTab === 'mine') return n.owner === userId;
     if (activeTab === 'shared') return n.owner !== userId;
     return true;
+  });
+
+  const sortedNetworks = [...filteredNetworks].sort((a, b) => {
+    if (sortBy === 'name') return a.name.localeCompare(b.name);
+    if (sortBy === 'health') return (b.healthScore ?? 100) - (a.healthScore ?? 100);
+    if (sortBy === 'devices') {
+      const aCount = a.nodes ? a.nodes.length : (a.stats?.devicesCount || 0);
+      const bCount = b.nodes ? b.nodes.length : (b.stats?.devicesCount || 0);
+      return bCount - aCount;
+    }
+    return new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0);
   });
 
   return (
@@ -153,7 +219,7 @@ const Dashboard = () => {
             paddingBottom: '0.75rem'
           }}
         >
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             <button
               onClick={() => setActiveTab('all')}
               style={{
@@ -199,27 +265,133 @@ const Dashboard = () => {
             >
               Shared & Public
             </button>
+            <button
+              onClick={() => setActiveTab('templates')}
+              style={{
+                padding: '6px 14px',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                border: 'none',
+                backgroundColor: activeTab === 'templates' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                color: activeTab === 'templates' ? '#38bdf8' : 'var(--text-secondary)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <BookOpen size={14} /> Saved Templates ({LAB_TEMPLATES.length})
+            </button>
           </div>
 
-          <div style={{ position: 'relative', width: '260px' }}>
-            <Search size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-            <input
-              type="text"
-              className="input-field"
-              placeholder="Search projects..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              style={{ paddingLeft: '32px', height: '34px', fontSize: '0.8rem' }}
-            />
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+            {activeTab !== 'templates' && (
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                style={{
+                  backgroundColor: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-color)',
+                  color: 'var(--text-secondary)',
+                  fontSize: '0.78rem',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '6px 10px',
+                  height: '34px',
+                  cursor: 'pointer'
+                }}
+              >
+                <option value="recent">Sort: Most Recent</option>
+                <option value="health">Sort: Highest Health</option>
+                <option value="devices">Sort: Most Devices</option>
+                <option value="name">Sort: Name (A-Z)</option>
+              </select>
+            )}
+
+            <div style={{ position: 'relative', width: '220px' }}>
+              <Search size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input
+                type="text"
+                className="input-field"
+                placeholder={activeTab === 'templates' ? 'Search templates...' : 'Search projects...'}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{ paddingLeft: '32px', height: '34px', fontSize: '0.8rem' }}
+              />
+            </div>
           </div>
         </div>
 
-        {/* Project Cards Grid */}
-        {loading ? (
+        {/* Templates Tab Content */}
+        {activeTab === 'templates' ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '1.25rem' }}>
+            {LAB_TEMPLATES.filter(t => t.name.toLowerCase().includes(searchTerm.toLowerCase()) || t.description.toLowerCase().includes(searchTerm.toLowerCase())).map((tmpl) => (
+              <div
+                key={tmpl.id}
+                className="glass-panel"
+                style={{
+                  padding: '1.25rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  gap: '0.75rem',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 'var(--radius-md)'
+                }}
+              >
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
+                    <span className="badge badge-primary" style={{ fontSize: '0.65rem' }}>
+                      {tmpl.category}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: '0.65rem',
+                        fontWeight: 700,
+                        padding: '2px 6px',
+                        borderRadius: '4px',
+                        backgroundColor: tmpl.difficulty === 'Beginner' ? 'rgba(16, 185, 129, 0.15)' : tmpl.difficulty === 'Intermediate' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                        color: tmpl.difficulty === 'Beginner' ? '#10b981' : tmpl.difficulty === 'Intermediate' ? '#38bdf8' : '#ef4444'
+                      }}
+                    >
+                      {tmpl.difficulty}
+                    </span>
+                  </div>
+
+                  <h3 style={{ fontSize: '0.98rem', fontWeight: 700, marginBottom: '0.35rem' }}>
+                    {tmpl.name}
+                  </h3>
+                  <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.4, marginBottom: '0.75rem' }}>
+                    {tmpl.description}
+                  </p>
+
+                  <div style={{ fontSize: '0.72rem', backgroundColor: 'var(--bg-tertiary)', padding: '6px 10px', borderRadius: '4px', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+                    <strong style={{ color: 'var(--text-secondary)' }}>Objective: </strong> {tmpl.objective}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    <span><strong>{tmpl.nodes.length}</strong> Devices</span>
+                    <span><strong>{tmpl.edges.length}</strong> Connections</span>
+                    <span><strong>{tmpl.testCases.length}</strong> Test Scenarios</span>
+                  </div>
+                </div>
+
+                <button
+                  className="btn btn-primary"
+                  style={{ width: '100%', marginTop: '0.5rem', justifyContent: 'center' }}
+                  onClick={() => handleLaunchTemplate(tmpl)}
+                >
+                  <Plus size={15} />
+                  <span>Launch Lab Template</span>
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : loading ? (
           <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--text-muted)' }}>
             Loading network projects...
           </div>
-        ) : filteredNetworks.length === 0 ? (
+        ) : sortedNetworks.length === 0 ? (
           <div
             style={{
               textAlign: 'center',
@@ -243,11 +415,12 @@ const Dashboard = () => {
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '1.25rem' }}>
-            {filteredNetworks.map((net) => {
+            {sortedNetworks.map((net) => {
               const devCount = net.nodes ? net.nodes.length : (net.stats?.devicesCount || 0);
               const connCount = net.edges ? net.edges.length : (net.stats?.connectionsCount || 0);
               const health = net.healthScore ?? 100;
               const isDemo = net.id === 'demo-enterprise-network' || net._id === 'demo-enterprise-network';
+              const lastModified = net.updatedAt || net.createdAt ? new Date(net.updatedAt || net.createdAt).toLocaleDateString() : 'Active';
 
               return (
                 <div
@@ -344,23 +517,42 @@ const Dashboard = () => {
 
                   {/* Footer Actions */}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.5rem' }}>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                      By {net.ownerName || 'Engineer'}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                      <Clock size={11} />
+                      <span>{lastModified}</span>
+                      <span>•</span>
+                      <span>By {net.ownerName || 'Engineer'}</span>
+                    </div>
 
-                    <div style={{ display: 'flex', gap: '0.4rem' }}>
+                    <div style={{ display: 'flex', gap: '0.35rem' }}>
                       {!isDemo && (
-                        <button
-                          className="btn btn-ghost btn-icon btn-sm"
-                          onClick={(e) => handleDeleteNetwork(e, net.id || net._id)}
-                          title="Delete Network"
-                          style={{ color: 'var(--danger)' }}
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        <>
+                          <button
+                            className="btn btn-ghost btn-icon btn-sm"
+                            onClick={(e) => handleRenameNetwork(e, net)}
+                            title="Rename Project"
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                          <button
+                            className="btn btn-ghost btn-icon btn-sm"
+                            onClick={(e) => handleDuplicateNetwork(e, net)}
+                            title="Duplicate Project"
+                          >
+                            <Copy size={13} />
+                          </button>
+                          <button
+                            className="btn btn-ghost btn-icon btn-sm"
+                            onClick={(e) => handleDeleteNetwork(e, net.id || net._id)}
+                            title="Delete Network"
+                            style={{ color: 'var(--danger)' }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </>
                       )}
                       <button className="btn btn-primary btn-sm">
-                        <span>Open Network</span>
+                        <span>Open</span>
                         <ArrowRight size={13} />
                       </button>
                     </div>

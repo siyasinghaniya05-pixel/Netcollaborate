@@ -110,13 +110,16 @@ io.on('connection', (socket) => {
     socket.join(roomId);
     const room = getRoom(roomId);
 
-    // Save user in active users
+    // Save user in active users with owner/editor/viewer role support
+    const isFirstUser = room.users.size === 0;
+    const assignedRole = user.roomRole || (isFirstUser ? 'owner' : (user.role === 'instructor' ? 'owner' : 'editor'));
+
     room.users.set(socket.id, {
       socketId: socket.id,
       userId: user.id || user._id,
       name: user.name || user.username || 'Collaborator',
       username: user.username || 'collaborator',
-      role: user.role || socket.role || 'student',
+      role: assignedRole,
       avatarColor: user.avatarColor || '#3b82f6',
       cursor: { x: 0, y: 0 }
     });
@@ -328,6 +331,28 @@ io.on('connection', (socket) => {
 
     socket.to(roomId).emit('config-synced', { nodeId, config, user });
     io.to(roomId).emit('activity-updated', room.activityLog);
+  // Real-time Role Management (Owner can set role to Owner, Editor, or Viewer)
+  socket.on('role-change', ({ roomId, targetSocketId, newRole, requesterUser }) => {
+    if (!roomId || !targetSocketId || !newRole) return;
+    const room = activeRooms.get(roomId);
+    if (room && room.users.has(targetSocketId)) {
+      const targetUser = room.users.get(targetSocketId);
+      const oldRole = targetUser.role;
+      targetUser.role = newRole;
+
+      const logEntry = {
+        id: 'log-' + Date.now(),
+        username: requesterUser?.name || currentUser?.name || 'Owner',
+        action: 'Permissions Changed',
+        details: `${targetUser.name}'s role changed from ${oldRole} to ${newRole.toUpperCase()}`,
+        timestamp: new Date().toLocaleTimeString()
+      };
+      room.activityLog.unshift(logEntry);
+      if (room.activityLog.length > 50) room.activityLog.pop();
+
+      io.to(roomId).emit('room-users', Array.from(room.users.values()));
+      io.to(roomId).emit('activity-updated', room.activityLog);
+    }
   });
 
   // Synchronized Simulation Broadcast (all users watch packet travel together)
@@ -462,6 +487,18 @@ mongoose.connect(MONGO_URI, {
     console.warn(`[Database] MongoDB offline or unreachable (${err.message}).`);
     console.log(`[Database] Running in high-resilience in-memory store mode. All features, collaboration, and network simulations remain 100% operational!`);
   });
+
+// Serve static client production build if available (supports full-stack single-service deployment)
+const path = require('path');
+const fs = require('fs');
+const clientDistPath = path.join(__dirname, '../client/dist');
+if (fs.existsSync(clientDistPath)) {
+  app.use(express.static(clientDistPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) return next();
+    res.sendFile(path.join(clientDistPath, 'index.html'));
+  });
+}
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {

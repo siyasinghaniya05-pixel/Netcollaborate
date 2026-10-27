@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node simulation/testSimulation.js"
+    "test": "node simulation/testSimulation.js && node simulation/testScenarios.js",
+    "test:scenarios": "node simulation/testScenarios.js",
+    "test:modulation": "node simulation/testModulation.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",

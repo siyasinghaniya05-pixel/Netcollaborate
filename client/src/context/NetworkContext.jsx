@@ -157,11 +157,13 @@ export const NetworkProvider = ({ children }) => {
 
   // Simulation & Animation State
   const [isSimulating, setIsSimulating] = useState(false);
+  const [isSimulationPaused, setIsSimulationPaused] = useState(false);
   const [simulationResult, setSimulationResult] = useState(null);
   const [activeStepIndex, setActiveStepIndex] = useState(-1);
   const [activeNodeId, setActiveNodeId] = useState(null);
   const [activeEdgeId, setActiveEdgeId] = useState(null);
   const [simulationHistory, setSimulationHistory] = useState([]);
+  const animationIntervalRef = useRef(null);
 
   // Collaboration State
   const [activeUsers, setActiveUsers] = useState([]);
@@ -721,37 +723,95 @@ export const NetworkProvider = ({ children }) => {
     });
   };
 
+  // Helper to apply single step to canvas
+  const applyAnimationStep = useCallback((step) => {
+    if (!step) return;
+    if (step.type === 'node') {
+      setActiveNodeId(step.id);
+      setActiveEdgeId(null);
+    } else if (step.type === 'edge') {
+      setActiveEdgeId(step.id);
+    }
+  }, []);
+
   // Step-by-Step Packet Simulation Player
-  const playSimulationAnimation = (simResult) => {
-    if (!simResult || !simResult.animationSteps) return;
+  const playSimulationAnimation = useCallback((simResult, startIdx = 0) => {
+    if (!simResult || !simResult.animationSteps || simResult.animationSteps.length === 0) return;
+
+    if (animationIntervalRef.current) {
+      clearInterval(animationIntervalRef.current);
+      animationIntervalRef.current = null;
+    }
 
     setIsSimulating(true);
+    setIsSimulationPaused(false);
     setSimulationResult(simResult);
-    const steps = simResult.animationSteps;
 
-    let idx = 0;
-    const interval = setInterval(() => {
+    const steps = simResult.animationSteps;
+    let idx = startIdx >= 0 && startIdx < steps.length ? startIdx : 0;
+
+    applyAnimationStep(steps[idx]);
+    setActiveStepIndex(idx);
+    idx++;
+
+    animationIntervalRef.current = setInterval(() => {
       if (idx >= steps.length) {
-        clearInterval(interval);
+        clearInterval(animationIntervalRef.current);
+        animationIntervalRef.current = null;
         setTimeout(() => {
           setIsSimulating(false);
+          setIsSimulationPaused(false);
           setActiveNodeId(null);
           setActiveEdgeId(null);
         }, 1200);
         return;
       }
 
-      const step = steps[idx];
+      applyAnimationStep(steps[idx]);
       setActiveStepIndex(idx);
-      if (step.type === 'node') {
-        setActiveNodeId(step.id);
-        setActiveEdgeId(null);
-      } else if (step.type === 'edge') {
-        setActiveEdgeId(step.id);
-      }
       idx++;
-    }, 700);
-  };
+    }, 750);
+  }, [applyAnimationStep]);
+
+  const pauseSimulation = useCallback(() => {
+    if (animationIntervalRef.current) {
+      clearInterval(animationIntervalRef.current);
+      animationIntervalRef.current = null;
+    }
+    setIsSimulationPaused(true);
+  }, []);
+
+  const resumeSimulation = useCallback(() => {
+    if (!simulationResult?.animationSteps) return;
+    const nextIdx = (activeStepIndex + 1) % simulationResult.animationSteps.length;
+    playSimulationAnimation(simulationResult, nextIdx);
+  }, [simulationResult, activeStepIndex, playSimulationAnimation]);
+
+  const stepSimulationForward = useCallback(() => {
+    if (!simulationResult?.animationSteps?.length) return;
+    if (animationIntervalRef.current) {
+      clearInterval(animationIntervalRef.current);
+      animationIntervalRef.current = null;
+    }
+    setIsSimulating(true);
+    setIsSimulationPaused(true);
+    const steps = simulationResult.animationSteps;
+    const nextIdx = (activeStepIndex + 1) >= steps.length ? 0 : activeStepIndex + 1;
+    setActiveStepIndex(nextIdx);
+    applyAnimationStep(steps[nextIdx]);
+  }, [simulationResult, activeStepIndex, applyAnimationStep]);
+
+  const resetSimulation = useCallback(() => {
+    if (animationIntervalRef.current) {
+      clearInterval(animationIntervalRef.current);
+      animationIntervalRef.current = null;
+    }
+    setIsSimulating(false);
+    setIsSimulationPaused(false);
+    setActiveStepIndex(-1);
+    setActiveNodeId(null);
+    setActiveEdgeId(null);
+  }, []);
 
   return (
     <NetworkContext.Provider
@@ -784,6 +844,7 @@ export const NetworkProvider = ({ children }) => {
         loadNetwork,
         saveNetwork,
         isSimulating,
+        isSimulationPaused,
         simulationResult,
         activeStepIndex,
         setActiveStepIndex,
@@ -792,6 +853,10 @@ export const NetworkProvider = ({ children }) => {
         activeEdgeId,
         setActiveEdgeId,
         playSimulationAnimation,
+        pauseSimulation,
+        resumeSimulation,
+        stepSimulationForward,
+        resetSimulation,
         simulationHistory,
         setSimulationHistory,
         activeUsers,

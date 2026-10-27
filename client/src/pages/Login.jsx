@@ -153,6 +153,78 @@ const Login = () => {
             </div>
           </div>
 
+          {/* Quick Demo Fill Buttons */}
+          <div
+            style={{
+              padding: '0.65rem 0.85rem',
+              borderRadius: 'var(--radius-sm)',
+              backgroundColor: 'var(--bg-tertiary)',
+              border: '1px dashed var(--border-color)',
+              marginBottom: '1.25rem'
+            }}
+          >
+            <div style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              One-Click Demo Credentials:
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedRole('student');
+                  setEmail('student@college.edu');
+                  setPassword('student123');
+                  setError('');
+                }}
+                style={{
+                  flex: 1,
+                  padding: '6px 8px',
+                  borderRadius: '6px',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  backgroundColor: 'rgba(2, 132, 199, 0.12)',
+                  color: '#0284c7',
+                  border: '1px solid rgba(2, 132, 199, 0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px'
+                }}
+              >
+                <User size={13} />
+                <span>Student Demo</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedRole('instructor');
+                  setEmail('instructor@college.edu');
+                  setPassword('faculty123');
+                  setError('');
+                }}
+                style={{
+                  flex: 1,
+                  padding: '6px 8px',
+                  borderRadius: '6px',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  backgroundColor: 'rgba(139, 92, 246, 0.12)',
+                  color: '#8b5cf6',
+                  border: '1px solid rgba(139, 92, 246, 0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px'
+                }}
+              >
+                <GraduationCap size={14} />
+                <span>Instructor Demo</span>
+              </button>
+            </div>
+          </div>
+
           {error && (
             <div
               style={{
@@ -178,7 +250,7 @@ const Login = () => {
               <div style={{ position: 'relative' }}>
                 <Mail size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                 <input
-                  type="email"
+                  type="text"
                   className="input-field"
                   placeholder={selectedRole === 'instructor' ? 'faculty@college.edu' : 'student@college.edu'}
                   value={email}

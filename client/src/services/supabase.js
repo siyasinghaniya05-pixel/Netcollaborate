@@ -1,24 +1,33 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://netcollaborate.supabase.co';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
 export const isSupabaseConfigured = () => {
   return (
-    supabaseUrl &&
-    supabaseAnonKey &&
+    Boolean(supabaseUrl) &&
+    Boolean(supabaseAnonKey) &&
     !supabaseAnonKey.includes('placeholder') &&
+    !supabaseAnonKey.includes('your-') &&
+    !supabaseUrl.includes('placeholder') &&
+    !supabaseUrl.includes('your-project') &&
+    !supabaseUrl.includes('netcollaborate.supabase.co') &&
+    !supabaseUrl.includes('cmwgmfllosztvmgjvuyh.supabase.co') &&
     supabaseUrl.startsWith('https://')
   );
 };
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true
+export const supabase = createClient(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseAnonKey || 'placeholder-anon-key',
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
   }
-});
+);
 
 /**
  * Supabase Data & Realtime Services for NetCollaborate

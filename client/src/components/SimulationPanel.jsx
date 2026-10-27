@@ -4,6 +4,11 @@ import {
   Terminal,
   History,
   Play,
+  Pause,
+  SkipForward,
+  RotateCcw,
+  Layers,
+  Info,
   CheckCircle2,
   XCircle,
   Clock,
@@ -13,7 +18,8 @@ import {
   Route,
   Radio,
   Zap,
-  Activity
+  Activity,
+  ExternalLink
 } from 'lucide-react';
 import { useNetwork } from '../context/NetworkContext';
 import { networkAPI } from '../services/api';
@@ -28,6 +34,12 @@ const SimulationPanel = ({ onClose }) => {
     nodes,
     edges,
     playSimulationAnimation,
+    pauseSimulation,
+    resumeSimulation,
+    stepSimulationForward,
+    resetSimulation,
+    isSimulationPaused,
+    activeStepIndex,
     simulationResult,
     isSimulating,
     simulationHistory,
@@ -36,6 +48,8 @@ const SimulationPanel = ({ onClose }) => {
   const { user } = useAuth();
 
   const [activeTab, setActiveTab] = useState('packet'); // 'packet' | 'fsk' | 'ping' | 'history' | 'traceroute'
+  const [selectedHop, setSelectedHop] = useState(null);
+  const [showOsiOverlay, setShowOsiOverlay] = useState(false);
 
   // Packet Simulator State
   const [sourceId, setSourceId] = useState(nodes[0]?.id || '');
@@ -425,7 +439,7 @@ const SimulationPanel = ({ onClose }) => {
                     gap: '0.5rem',
                     fontSize: '0.8rem',
                     fontWeight: 700,
-                    marginBottom: '0.75rem'
+                    marginBottom: '0.5rem'
                   }}
                 >
                   {simulationResult.success ? <CheckCircle2 size={18} /> : <XCircle size={18} />}
@@ -442,7 +456,7 @@ const SimulationPanel = ({ onClose }) => {
                       display: 'grid',
                       gridTemplateColumns: 'repeat(4, 1fr)',
                       gap: '0.5rem',
-                      marginBottom: '0.75rem'
+                      marginBottom: '0.5rem'
                     }}
                   >
                     <div style={{ padding: '0.4rem 0.6rem', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)' }}>
@@ -466,30 +480,236 @@ const SimulationPanel = ({ onClose }) => {
                   </div>
                 )}
 
-                {/* Hop-by-Hop Trace Steps */}
-                <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                  {(simulationResult.hops || []).map((h, i) => (
-                    <div
-                      key={i}
+                {/* Interactive Playback Controls Bar */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '0.4rem 0.75rem',
+                    backgroundColor: 'var(--bg-tertiary)',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--border-color)',
+                    marginBottom: '0.5rem'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    {isSimulating && !isSimulationPaused ? (
+                      <button
+                        className="btn btn-secondary"
+                        style={{ padding: '4px 10px', fontSize: '0.72rem' }}
+                        onClick={pauseSimulation}
+                        title="Pause Packet Simulation"
+                      >
+                        <Pause size={13} /> Pause
+                      </button>
+                    ) : (
+                      <button
+                        className="btn btn-primary"
+                        style={{ padding: '4px 10px', fontSize: '0.72rem' }}
+                        onClick={() => {
+                          if (isSimulationPaused) {
+                            resumeSimulation();
+                          } else {
+                            playSimulationAnimation(simulationResult);
+                          }
+                        }}
+                        title="Play or Resume Packet Simulation"
+                      >
+                        <Play size={13} /> {isSimulationPaused ? 'Resume' : 'Replay'}
+                      </button>
+                    )}
+
+                    <button
+                      className="btn btn-secondary"
+                      style={{ padding: '4px 10px', fontSize: '0.72rem' }}
+                      onClick={stepSimulationForward}
+                      title="Step Forward One Hop"
+                    >
+                      <SkipForward size={13} /> Step
+                    </button>
+
+                    <button
+                      className="btn btn-secondary"
+                      style={{ padding: '4px 10px', fontSize: '0.72rem' }}
+                      onClick={resetSimulation}
+                      title="Reset Packet Movement"
+                    >
+                      <RotateCcw size={13} /> Reset
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      Current Step:{' '}
+                      <strong style={{ color: 'var(--primary)' }}>
+                        {activeStepIndex >= 0 ? activeStepIndex + 1 : '-'} / {(simulationResult.animationSteps || []).length}
+                      </strong>
+                    </span>
+
+                    <button
+                      onClick={() => setShowOsiOverlay(!showOsiOverlay)}
                       style={{
-                        padding: '0.5rem 0.75rem',
-                        backgroundColor: 'var(--bg-tertiary)',
-                        borderRadius: 'var(--radius-sm)',
-                        fontSize: '0.75rem',
+                        background: showOsiOverlay ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                        border: '1px solid var(--border-color)',
+                        color: showOsiOverlay ? 'var(--primary)' : 'var(--text-secondary)',
+                        borderRadius: '4px',
+                        padding: '3px 8px',
+                        fontSize: '0.7rem',
+                        cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '0.75rem',
-                        borderLeft: h.status === 'error' ? '3px solid var(--danger)' : '3px solid var(--primary)'
+                        gap: '4px',
+                        fontWeight: 600
                       }}
                     >
-                      <span className="badge badge-primary" style={{ fontSize: '0.65rem', minWidth: '40px' }}>
-                        Hop {h.step}
-                      </span>
-                      <span style={{ fontWeight: 700, minWidth: '110px' }}>{h.device}</span>
-                      <span style={{ color: 'var(--primary)', fontWeight: 600 }}>{h.action}:</span>
-                      <span style={{ color: 'var(--text-secondary)', flex: 1 }}>{h.details}</span>
+                      <Layers size={13} /> OSI Model
+                    </button>
+                  </div>
+                </div>
+
+                {/* OSI Model Overlay (Collapsible) */}
+                {showOsiOverlay && (
+                  <div
+                    style={{
+                      padding: '0.6rem 0.8rem',
+                      backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid #3b82f6',
+                      marginBottom: '0.5rem',
+                      fontSize: '0.72rem'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <strong style={{ color: '#38bdf8' }}>OSI 7-Layer Protocol Stack Breakdown</strong>
+                      <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Active Layers in this Transmission</span>
                     </div>
-                  ))}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', opacity: protocol === 'HTTP' || protocol === 'DNS' ? 1 : 0.6 }}>
+                        <span style={{ minWidth: '60px', fontWeight: 700, color: '#ec4899' }}>Layer 7</span>
+                        <strong>Application:</strong>
+                        <span>{protocol === 'HTTP' ? 'HTTP Web request GET / index.html' : protocol === 'DNS' ? 'DNS Name Query' : 'ICMP Echo payload generation'}</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', opacity: protocol === 'TCP' ? 1 : 0.6 }}>
+                        <span style={{ minWidth: '60px', fontWeight: 700, color: '#8b5cf6' }}>Layer 4</span>
+                        <strong>Transport:</strong>
+                        <span>{protocol === 'TCP' ? 'TCP SYN Flag, Port Negotiation' : 'ICMP Echo Protocol Type 8'}</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#60a5fa' }}>
+                        <span style={{ minWidth: '60px', fontWeight: 700 }}>Layer 3</span>
+                        <strong>Network:</strong>
+                        <span>IPv4 Header ({simulationResult.packetInfo?.sourceIP} → {simulationResult.packetInfo?.destIP}), Route LPM Lookup, TTL Decrement</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#06b6d4' }}>
+                        <span style={{ minWidth: '60px', fontWeight: 700 }}>Layer 2</span>
+                        <strong>Data Link:</strong>
+                        <span>Ethernet II Frame, MAC Address Resolution (ARP), 802.1Q VLAN Tags, Switch MAC Table Lookup</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#f59e0b' }}>
+                        <span style={{ minWidth: '60px', fontWeight: 700 }}>Layer 1</span>
+                        <strong>Physical:</strong>
+                        <span>Bitstream signaling across twisted-pair Ethernet / BFSK modulation across physical links</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Hop Details Inspector Card if hop is selected */}
+                {selectedHop && (
+                  <div
+                    style={{
+                      padding: '0.6rem 0.85rem',
+                      backgroundColor: 'rgba(30, 41, 59, 0.95)',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--primary)',
+                      marginBottom: '0.5rem',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span className="badge badge-primary" style={{ fontSize: '0.68rem' }}>
+                          Hop #{selectedHop.step} Inspector
+                        </span>
+                        <strong style={{ fontSize: '0.8rem', color: '#ffffff' }}>{selectedHop.device}</strong>
+                      </div>
+                      <button
+                        onClick={() => setSelectedHop(null)}
+                        style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.72rem' }}
+                      >
+                        ✕ Close
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', fontSize: '0.72rem', marginTop: '2px' }}>
+                      <div>
+                        <span style={{ color: 'var(--text-muted)' }}>Action: </span>
+                        <strong style={{ color: 'var(--primary)' }}>{selectedHop.action}</strong>
+                      </div>
+                      <div>
+                        <span style={{ color: 'var(--text-muted)' }}>In/Out Port: </span>
+                        <span>{selectedHop.incomingInterface || 'Auto'} → {selectedHop.outgoingInterface || 'Egress'}</span>
+                      </div>
+                      <div>
+                        <span style={{ color: 'var(--text-muted)' }}>Routing Decision: </span>
+                        <span>{selectedHop.details}</span>
+                      </div>
+                    </div>
+
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', backgroundColor: 'var(--bg-secondary)', padding: '4px 8px', borderRadius: '4px', marginTop: '2px' }}>
+                      <strong style={{ color: '#38bdf8' }}>Networking Engine Decision: </strong>
+                      {selectedHop.action.toLowerCase().includes('route')
+                        ? `Router inspected packet IPv4 destination ${simulationResult.packetInfo?.destIP}, matched the longest prefix route (/24) in the FIB table, decremented TTL to prevent loops, and queued packet onto next hop interface.`
+                        : selectedHop.action.toLowerCase().includes('switch')
+                        ? `Switch received Ethernet frame, looked up destination MAC in its CAM table, and forwarded frame to designated physical interface without modifying Layer 3 IP addressing.`
+                        : selectedHop.action.toLowerCase().includes('arp')
+                        ? `ARP Cache resolution: Host looked up destination hardware MAC address for default gateway to construct the Layer 2 Ethernet frame.`
+                        : `Device processed packet event: ${selectedHop.details}`}
+                    </div>
+                  </div>
+                )}
+
+                {/* Hop-by-Hop Trace Steps (Clickable) */}
+                <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                  {(simulationResult.hops || []).map((h, i) => {
+                    const isSelected = selectedHop?.step === h.step;
+                    const isStepActive = activeStepIndex === i;
+
+                    return (
+                      <div
+                        key={i}
+                        onClick={() => setSelectedHop(h)}
+                        style={{
+                          padding: '0.5rem 0.75rem',
+                          backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.15)' : 'var(--bg-tertiary)',
+                          borderRadius: 'var(--radius-sm)',
+                          fontSize: '0.75rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.75rem',
+                          cursor: 'pointer',
+                          borderLeft: h.status === 'error' ? '3px solid var(--danger)' : isStepActive ? '3px solid var(--warning)' : isSelected ? '3px solid var(--primary)' : '3px solid #334155',
+                          border: isSelected ? '1px solid var(--primary)' : undefined,
+                          transition: 'all 0.15s ease'
+                        }}
+                        title="Click to inspect hop forwarding decision and OSI layers"
+                      >
+                        <span className="badge badge-primary" style={{ fontSize: '0.65rem', minWidth: '40px' }}>
+                          Hop {h.step}
+                        </span>
+                        <span style={{ fontWeight: 700, minWidth: '100px' }}>{h.device}</span>
+                        <span style={{ color: 'var(--primary)', fontWeight: 600 }}>{h.action}:</span>
+                        <span style={{ color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {h.details}
+                        </span>
+                        <span style={{ fontSize: '0.68rem', color: 'var(--primary)', opacity: 0.8 }}>
+                          Inspect →
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             ) : (
